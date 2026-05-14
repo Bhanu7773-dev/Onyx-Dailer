@@ -8,6 +8,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:wavedialer/screens/dialpad_screen.dart';
 import 'package:wavedialer/screens/contacts_screen.dart';
 import 'package:wavedialer/screens/recents_screen.dart';
+import 'package:wavedialer/screens/startup_screen.dart';
 import 'package:wavedialer/screens/recordings_screen.dart';
 import 'package:wavedialer/services/telecom_service.dart';
 
@@ -55,6 +56,15 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _checkRootAccess() async {
+    final prefs = await SharedPreferences.getInstance();
+    final mode = prefs.getString('start_mode') ?? 'none';
+
+    // Skip root check if user chose Shizuku or Basic mode
+    if (mode == 'shizuku' || mode == 'none') {
+      debugPrint('ROOT ACCESS: Skipping check for $mode mode.');
+      return;
+    }
+
     try {
       final result = await Process.run('su', ['-c', 'id']);
       if (result.exitCode != 0) {
@@ -256,14 +266,27 @@ class _SettingsDialog extends StatefulWidget {
 }
 
 class _SettingsDialogState extends State<_SettingsDialog> {
-  bool? _isRooted;         // null = checking, true = granted, false = denied
+  String _startMode = 'none';
   bool _autoRecord = false;
+  bool? _isRooted;
 
   @override
   void initState() {
     super.initState();
-    _checkRoot();
     _loadPrefs();
+  }
+
+  Future<void> _loadPrefs() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (mounted) {
+      setState(() {
+        _startMode = prefs.getString('start_mode') ?? 'none';
+        _autoRecord = prefs.getBool('auto_record') ?? false;
+      });
+    }
+    if (_startMode == 'root') {
+      _checkRoot();
+    }
   }
 
   Future<void> _checkRoot() async {
@@ -275,9 +298,15 @@ class _SettingsDialogState extends State<_SettingsDialog> {
     }
   }
 
-  Future<void> _loadPrefs() async {
+  Future<void> _resetSetup() async {
     final prefs = await SharedPreferences.getInstance();
-    if (mounted) setState(() => _autoRecord = prefs.getBool('auto_record') ?? false);
+    await prefs.remove('start_mode');
+    if (mounted) {
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (_) => const StartupScreen()),
+        (route) => false,
+      );
+    }
   }
 
   Future<void> _toggleAutoRecord(bool value) async {
@@ -290,61 +319,66 @@ class _SettingsDialogState extends State<_SettingsDialog> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    Widget rootIndicator;
-    if (_isRooted == null) {
-      rootIndicator = const SizedBox(
-        width: 16, height: 16,
-        child: CircularProgressIndicator(strokeWidth: 2),
-      );
-    } else {
-      rootIndicator = Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 12, height: 12,
-            decoration: BoxDecoration(
-              color: _isRooted! ? Colors.green : Colors.red,
-              shape: BoxShape.circle,
-            ),
-          ),
-          const SizedBox(width: 8),
-          Text(
-            _isRooted! ? 'Granted (Magisk/KernelSU)' : 'Not available',
-            style: TextStyle(
-              color: _isRooted! ? Colors.green : Colors.red,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-        ],
-      );
+    String engineTitle = 'Basic Mode';
+    Color engineColor = Colors.grey;
+    IconData engineIcon = Icons.info_outline_rounded;
+
+    if (_startMode == 'root') {
+      engineTitle = 'Root Engine';
+      engineColor = (_isRooted == true) ? Colors.green : Colors.red;
+      engineIcon = Icons.bolt_rounded;
+    } else if (_startMode == 'shizuku') {
+      engineTitle = 'Shizuku Engine';
+      engineColor = Colors.blue;
+      engineIcon = Icons.layers_rounded;
     }
 
     return AlertDialog(
-      title: const Text('Settings'),
+      backgroundColor: const Color(0xFF1C1C1E),
+      title: const Text('Settings', style: TextStyle(color: Colors.white)),
       content: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Root status section
-          Text('Root Access', style: theme.textTheme.labelLarge),
-          const SizedBox(height: 6),
-          rootIndicator,
-          const Divider(height: 28),
+          Text('Active Engine', style: theme.textTheme.labelLarge?.copyWith(color: Colors.grey)),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Icon(engineIcon, color: engineColor, size: 20),
+              const SizedBox(width: 8),
+              Text(
+                engineTitle,
+                style: TextStyle(color: engineColor, fontWeight: FontWeight.bold, fontSize: 16),
+              ),
+              if (_startMode == 'root' && _isRooted == false)
+                const Text(' (Access Denied)', style: TextStyle(color: Colors.red, fontSize: 12)),
+            ],
+          ),
+          const SizedBox(height: 16),
+          OutlinedButton(
+            onPressed: _resetSetup,
+            style: OutlinedButton.styleFrom(
+              foregroundColor: Colors.grey,
+              side: BorderSide(color: Colors.white.withOpacity(0.1)),
+            ),
+            child: const Text('Change Setup Mode'),
+          ),
+          const Divider(height: 32, color: Colors.white10),
 
-          // Recording settings
-          Text('Recording', style: theme.textTheme.labelLarge),
+          Text('Recording', style: theme.textTheme.labelLarge?.copyWith(color: Colors.grey)),
           const SizedBox(height: 4),
           Text(
             'Saves to: /sdcard/Music/OnyxDialer/',
-            style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.outline),
+            style: theme.textTheme.bodySmall?.copyWith(color: Colors.grey),
           ),
           const SizedBox(height: 12),
           SwitchListTile(
             contentPadding: EdgeInsets.zero,
-            title: const Text('Auto-record calls'),
-            subtitle: const Text('Starts recording automatically when a call connects'),
+            title: const Text('Auto-record calls', style: TextStyle(color: Colors.white)),
+            subtitle: const Text('Starts recording on connect', style: TextStyle(color: Colors.grey, fontSize: 12)),
             value: _autoRecord,
             onChanged: _toggleAutoRecord,
+            activeColor: const Color(0xFF007AFF),
           ),
         ],
       ),

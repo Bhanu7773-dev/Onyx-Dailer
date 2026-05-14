@@ -17,12 +17,46 @@ import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodChannel
+import rikka.shizuku.Shizuku
+import android.content.ServiceConnection
+import android.os.IBinder
+import android.content.ComponentName
 
 class MainActivity: FlutterActivity() {
     private val METHOD_CHANNEL = "dark.onyx.com/telecom_commands"
     private val EVENT_CHANNEL = "dark.onyx.com/telecom_events"
     private var eventSink: EventChannel.EventSink? = null
     private var toneGenerator: ToneGenerator? = null
+    private var callRecorderService: ICallRecorderService? = null
+    private var pendingRecordingPath: String? = null
+
+    private val serviceArgs by lazy {
+        Shizuku.UserServiceArgs(ComponentName(packageName, CallRecorderService::class.java.name))
+            .daemon(false)
+            .processNameSuffix("recorder")
+            .debuggable(true)
+            .version(1)
+    }
+
+    private val serviceConnection = object : ServiceConnection {
+        override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
+            callRecorderService = ICallRecorderService.Stub.asInterface(service)
+            android.util.Log.d("OnyxMainActivity", "Shizuku Service Connected")
+            pendingRecordingPath?.let {
+                try {
+                    callRecorderService?.startRecording(it)
+                    pendingRecordingPath = null
+                } catch (e: Exception) {
+                    android.util.Log.e("OnyxMainActivity", "Failed to start pending recording: ${e.message}")
+                }
+            }
+        }
+
+        override fun onServiceDisconnected(name: ComponentName?) {
+            callRecorderService = null
+            android.util.Log.d("OnyxMainActivity", "Shizuku Service Disconnected")
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -129,6 +163,25 @@ class MainActivity: FlutterActivity() {
                         }
                     }
                     result.success(null)
+                }
+                "startShizukuRecording" -> {
+                    val filePath = call.argument<String>("filePath")
+                    if (filePath != null) {
+                        if (callRecorderService == null) {
+                            pendingRecordingPath = filePath
+                            Shizuku.bindUserService(serviceArgs, serviceConnection)
+                        } else {
+                            callRecorderService?.startRecording(filePath)
+                        }
+                    }
+                    result.success(null)
+                }
+                "stopShizukuRecording" -> {
+                    callRecorderService?.stopRecording()
+                    result.success(null)
+                }
+                "isShizukuServiceRunning" -> {
+                    result.success(callRecorderService != null)
                 }
                 else -> result.notImplemented()
             }

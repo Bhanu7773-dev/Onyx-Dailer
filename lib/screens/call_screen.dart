@@ -137,13 +137,13 @@ class _CallScreenState extends State<CallScreen> {
     if (autoRecord && !_isRecording) _toggleRecording();
   }
 
-  void _toggleRecording() {
+  Future<void> _toggleRecording() async {
     setState(() => _isRecording = !_isRecording);
     if (_isRecording) {
       final safeNumber = _number.replaceAll(RegExp(r'[^0-9+]'), '');
       final fileName = 'Call_${safeNumber}_${DateTime.now().millisecondsSinceEpoch}.wav';
       final dir = Directory('/sdcard/Music/OnyxDialer');
-      if (!dir.existsSync()) dir.createSync(recursive: true);
+      if (!(await dir.exists())) await dir.create(recursive: true);
       TelecomService.startRecording('${dir.path}/$fileName');
     } else {
       TelecomService.stopRecording();

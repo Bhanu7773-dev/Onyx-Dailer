@@ -1,0 +1,173 @@
+package dark.onyx.com;
+
+import android.media.AudioFormat;
+import android.media.AudioRecord;
+import android.media.MediaRecorder;
+import android.os.Process;
+import android.util.Log;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.File;
+
+public class CallRecorderService extends ICallRecorderService.Stub {
+    private static final String TAG = "OnyxShizukuRecorder";
+    private boolean mIsRecording = false;
+    private RecordingThread mRecordingThread;
+
+    @Override
+    public void startRecording(String filePath) {
+        if (mIsRecording) return;
+        mIsRecording = true;
+        mRecordingThread = new RecordingThread(filePath);
+        mRecordingThread.start();
+        Log.d(TAG, "Recording started: " + filePath);
+    }
+
+    @Override
+    public void stopRecording() {
+        mIsRecording = false;
+        if (mRecordingThread != null) {
+            mRecordingThread.stopRecording();
+            mRecordingThread = null;
+        }
+        Log.d(TAG, "Recording stopped");
+    }
+
+    @Override
+    public boolean isRecording() {
+        return mIsRecording;
+    }
+
+    private class RecordingThread extends Thread {
+        private final String mFilePath;
+        private AudioRecord mAudioRecord;
+        private volatile boolean mRunning = true;
+
+        public RecordingThread(String filePath) {
+            this.mFilePath = filePath;
+        }
+
+        public void stopRecording() {
+            mRunning = false;
+        }
+
+        @Override
+        public void run() {
+            int sampleRate = 44100;
+            int channelConfig = AudioFormat.CHANNEL_IN_MONO;
+            int audioFormat = AudioFormat.ENCODING_PCM_16BIT;
+            int bufferSize = AudioRecord.getMinBufferSize(sampleRate, channelConfig, audioFormat);
+
+            // Fallback sources ladder
+            int[] sources = {
+                MediaRecorder.AudioSource.VOICE_CALL,
+                MediaRecorder.AudioSource.VOICE_UPLINK,
+                MediaRecorder.AudioSource.VOICE_DOWNLINK,
+                MediaRecorder.AudioSource.VOICE_COMMUNICATION,
+                MediaRecorder.AudioSource.MIC
+            };
+
+            for (int source : sources) {
+                try {
+                    mAudioRecord = new AudioRecord(source, sampleRate, channelConfig, audioFormat, bufferSize);
+                    if (mAudioRecord.getState() == AudioRecord.STATE_INITIALIZED) {
+                        Log.d(TAG, "Using audio source: " + source);
+                        break;
+                    }
+                    mAudioRecord.release();
+                } catch (Exception e) {
+                    Log.e(TAG, "Failed to init source " + source + ": " + e.getMessage());
+                }
+            }
+
+            if (mAudioRecord == null || mAudioRecord.getState() != AudioRecord.STATE_INITIALIZED) {
+                Log.e(TAG, "Failed to initialize AudioRecord with any source");
+                mIsRecording = false;
+                return;
+            }
+
+            Log.d(TAG, "RecordingThread started for: " + mFilePath);
+            try (FileOutputStream os = new FileOutputStream(mFilePath)) {
+                Log.d(TAG, "File opened successfully");
+                writeWavHeader(os, channelConfig, sampleRate, audioFormat);
+                
+                mAudioRecord.startRecording();
+                Log.d(TAG, "AudioRecord started. State: " + mAudioRecord.getRecordingState());
+                
+                byte[] data = new byte[bufferSize];
+                long totalAudioLen = 0;
+
+                while (mRunning) {
+                    int read = mAudioRecord.read(data, 0, bufferSize);
+                    if (read > 0) {
+                        os.write(data, 0, read);
+                        totalAudioLen += read;
+                    } else if (read < 0) {
+                        Log.e(TAG, "AudioRecord read error: " + read);
+                        break;
+                    }
+                }
+
+                Log.d(TAG, "Loop finished. Total bytes: " + totalAudioLen);
+                mAudioRecord.stop();
+                mAudioRecord.release();
+                
+                // Update WAV header with final length
+                updateWavHeader(mFilePath, totalAudioLen);
+                Log.d(TAG, "WAV header updated");
+
+            } catch (IOException e) {
+                Log.e(TAG, "IO Error during recording: " + e.getMessage());
+            } finally {
+                mIsRecording = false;
+                Log.d(TAG, "RecordingThread finished");
+            }
+        }
+
+        private void writeWavHeader(FileOutputStream out, int channelConfig, int sampleRate, int audioFormat) throws IOException {
+            byte[] header = new byte[44];
+            int channels = (channelConfig == AudioFormat.CHANNEL_IN_MONO) ? 1 : 2;
+            long byteRate = sampleRate * channels * 2;
+
+            header[0] = 'R'; header[1] = 'I'; header[2] = 'F'; header[3] = 'F';
+            header[4] = 0; header[5] = 0; header[6] = 0; header[7] = 0; // Size (fill later)
+            header[8] = 'W'; header[9] = 'A'; header[10] = 'V'; header[11] = 'E';
+            header[12] = 'f'; header[13] = 'm'; header[14] = 't'; header[15] = ' ';
+            header[16] = 16; header[17] = 0; header[18] = 0; header[19] = 0; // Subchunk1Size
+            header[20] = 1; header[21] = 0; // AudioFormat (PCM)
+            header[22] = (byte) channels; header[23] = 0;
+            header[24] = (byte) (sampleRate & 0xff);
+            header[25] = (byte) ((sampleRate >> 8) & 0xff);
+            header[26] = (byte) ((sampleRate >> 16) & 0xff);
+            header[27] = (byte) ((sampleRate >> 24) & 0xff);
+            header[28] = (byte) (byteRate & 0xff);
+            header[29] = (byte) ((byteRate >> 8) & 0xff);
+            header[30] = (byte) ((byteRate >> 16) & 0xff);
+            header[31] = (byte) ((byteRate >> 24) & 0xff);
+            header[32] = (byte) (channels * 2); header[33] = 0; // BlockAlign
+            header[34] = 16; header[35] = 0; // BitsPerSample
+            header[36] = 'd'; header[37] = 'a'; header[38] = 't'; header[39] = 'a';
+            header[40] = 0; header[41] = 0; header[42] = 0; header[43] = 0; // Data size (fill later)
+
+            out.write(header, 0, 44);
+        }
+
+        private void updateWavHeader(String filePath, long totalAudioLen) {
+            try (java.io.RandomAccessFile raf = new java.io.RandomAccessFile(filePath, "rw")) {
+                long totalDataLen = totalAudioLen + 36;
+                raf.seek(4);
+                raf.write((int) (totalDataLen & 0xff));
+                raf.write((int) ((totalDataLen >> 8) & 0xff));
+                raf.write((int) ((totalDataLen >> 16) & 0xff));
+                raf.write((int) ((totalDataLen >> 24) & 0xff));
+                raf.seek(40);
+                raf.write((int) (totalAudioLen & 0xff));
+                raf.write((int) ((totalAudioLen >> 8) & 0xff));
+                raf.write((int) ((totalAudioLen >> 16) & 0xff));
+                raf.write((int) ((totalAudioLen >> 24) & 0xff));
+            } catch (IOException e) {
+                Log.e(TAG, "Failed to update WAV header: " + e.getMessage());
+            }
+        }
+    }
+}
