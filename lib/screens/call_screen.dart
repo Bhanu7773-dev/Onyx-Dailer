@@ -5,6 +5,7 @@ import 'package:flutter_contacts/flutter_contacts.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:wavedialer/services/telecom_service.dart';
+import 'package:proximity_sensor/proximity_sensor.dart';
 
 const _bg = Color(0xFF000000);
 const _iosSecondary = Color(0xFF8E8E93);
@@ -23,7 +24,7 @@ class CallScreen extends StatefulWidget {
 }
 
 class _CallScreenState extends State<CallScreen> {
-  int _callState = 0; // 0=New, 1=Dialing, 2=Ringing, 4=Active, 7=Disconnected
+  int _callState = 0;
   String _number = '';
   String? _name;
   bool _showKeypad = false;
@@ -34,14 +35,18 @@ class _CallScreenState extends State<CallScreen> {
   String _dtmfInput = '';
   
   StreamSubscription? _subscription;
+  StreamSubscription<int>? _proximitySub;
   Timer? _timer;
   int _seconds = 0;
+  bool _isNear = false;
+  bool _blockProximity = false;
 
   @override
   void initState() {
     super.initState();
     _number = widget.initialNumber;
     _resolveContactName();
+    _initProximity();
     _subscription = TelecomService.callStateStream.listen((data) {
       if (!mounted) return;
       setState(() {
@@ -94,10 +99,24 @@ class _CallScreenState extends State<CallScreen> {
     }
   }
 
+  Future<void> _initProximity() async {
+    final prefs = await SharedPreferences.getInstance();
+    _blockProximity = prefs.getBool('block_proximity') ?? false;
+    
+    if (!_blockProximity) {
+      ProximitySensor.setProximityScreenOff(true);
+      _proximitySub = ProximitySensor.events.listen((event) {
+        if (mounted) setState(() => _isNear = (event > 0));
+      });
+    }
+  }
+
   @override
   void dispose() {
     _subscription?.cancel();
+    _proximitySub?.cancel();
     _timer?.cancel();
+    ProximitySensor.setProximityScreenOff(false);
     super.dispose();
   }
 
@@ -143,8 +162,6 @@ class _CallScreenState extends State<CallScreen> {
       default: return 'connecting...';
     }
   }
-
-  // ── UI Components ────────────────────────────────────────────────────────
 
   Widget _buildControlButton({
     required IconData icon,
@@ -209,8 +226,6 @@ class _CallScreenState extends State<CallScreen> {
     );
   }
 
-  // ── Build ────────────────────────────────────────────────────────────────
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -218,11 +233,9 @@ class _CallScreenState extends State<CallScreen> {
       body: SafeArea(
         child: Column(
           children: [
-            // Header Info
             const SizedBox(height: 40),
             
             if (!_showKeypad) ...[
-              // Large Avatar to fill the empty space
               Container(
                 width: 110, height: 110,
                 decoration: const BoxDecoration(
@@ -264,9 +277,7 @@ class _CallScreenState extends State<CallScreen> {
 
             const Spacer(),
 
-            // Middle Section
             if (_showKeypad) ...[
-              // DTMF Keypad Overlay
               Container(
                 height: 50,
                 alignment: Alignment.center,
@@ -321,14 +332,12 @@ class _CallScreenState extends State<CallScreen> {
                 ),
               ),
               const SizedBox(height: 40),
-              // Hide Keypad Button
               GestureDetector(
                 onTap: () => setState(() => _showKeypad = false),
                 child: const Text('Hide', style: TextStyle(fontSize: 18, color: Colors.white)),
               ),
               const SizedBox(height: 40),
             ] else ...[
-              // 6-Button Grid
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 45),
                 child: Column(
@@ -393,11 +402,10 @@ class _CallScreenState extends State<CallScreen> {
               const SizedBox(height: 60),
             ],
 
-            // Bottom Actions
             Padding(
               padding: const EdgeInsets.only(bottom: 48, left: 45, right: 45),
               child: _callState == 2
-                  ? Row( // Incoming Call (Accept/Decline)
+                  ? Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         GestureDetector(
@@ -418,7 +426,7 @@ class _CallScreenState extends State<CallScreen> {
                         ),
                       ],
                     )
-                  : Center( // Active/Dialing Call (End)
+                  : Center(
                       child: GestureDetector(
                         onTap: () {
                           if (_callState != 7) TelecomService.endCall();

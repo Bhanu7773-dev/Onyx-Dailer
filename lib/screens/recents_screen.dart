@@ -9,8 +9,11 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:wavedialer/screens/call_screen.dart';
 import 'package:wavedialer/services/telecom_service.dart';
 import 'package:wavedialer/widgets/contact_details_sheet.dart';
+import 'package:wavedialer/widgets/contact_dialogs.dart';
+import 'package:flutter_contacts/flutter_contacts.dart';
+import 'dart:ui';
 
-// iOS Color Constants
+
 const _iosBlue = Color(0xFF007AFF);
 const _iosRed = Color(0xFFFF3B30);
 const _iosBg = Color(0xFF000000);
@@ -20,7 +23,6 @@ const _iosLabel = Color(0xFFFFFFFF);
 const _iosSecondary = Color(0xFF8E8E93);
 const _iosTertiary = Color(0xFF48484A);
 
-// Filter Enum
 enum _Filter { all, incoming, outgoing, missed }
 
 class RecentsScreen extends StatefulWidget {
@@ -33,6 +35,7 @@ class RecentsScreen extends StatefulWidget {
 class _RecentsScreenState extends State<RecentsScreen> with WidgetsBindingObserver {
   List<CallLogEntry>? _callLogs;
   _Filter _filter = _Filter.all;
+  Set<String> _blockedNumbers = {};
 
   @override
   void initState() {
@@ -56,9 +59,27 @@ class _RecentsScreenState extends State<RecentsScreen> with WidgetsBindingObserv
 
   Future<void> _fetchCallLogs() async {
     final entries = await CallLog.get();
+    
+    Set<String> blockedNums = {};
+    try {
+      if (await FlutterContacts.blockedNumbers.isAvailable()) {
+        final blocked = await FlutterContacts.blockedNumbers.getAll();
+        blockedNums = blocked.map((p) => p.number.replaceAll(RegExp(r'\D'), '')).toSet();
+      }
+    } catch (_) {}
+
     if (mounted) {
-      setState(() => _callLogs = List<CallLogEntry>.from(entries));
+      setState(() {
+        _callLogs = List<CallLogEntry>.from(entries);
+        _blockedNumbers = blockedNums;
+      });
     }
+  }
+
+  bool _isNumberBlocked(String? number) {
+    if (number == null) return false;
+    final clean = number.replaceAll(RegExp(r'\D'), '');
+    return _blockedNumbers.contains(clean);
   }
 
   bool _isMissed(CallType? t) =>
@@ -74,7 +95,7 @@ class _RecentsScreenState extends State<RecentsScreen> with WidgetsBindingObserv
     }
   }
 
-  // Group entries by date label
+
   Map<String, List<CallLogEntry>> _grouped(List<CallLogEntry> logs) {
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
@@ -199,6 +220,87 @@ class _RecentsScreenState extends State<RecentsScreen> with WidgetsBindingObserv
       phone: log.number!,
     );
     _fetchCallLogs();
+  }
+
+  Future<void> _handleEdit(String? number) async {
+    if (number == null) return;
+    final contacts = await FlutterContacts.getAll(filter: ContactFilter.phone(number));
+    if (contacts.isNotEmpty) {
+      ContactDialogs.showEditContact(context, contacts.first, onDone: _fetchCallLogs);
+    } else {
+      ContactDialogs.showNewContact(context, initialPhone: number, onDone: _fetchCallLogs);
+    }
+  }
+
+  Future<void> _handleBlock(String? number, String? name) async {
+    if (number == null) return;
+    HapticFeedback.mediumImpact();
+    
+    final isAvailable = await FlutterContacts.blockedNumbers.isAvailable();
+    if (!isAvailable) {
+      showCupertinoDialog(
+        context: context,
+        builder: (ctx) => BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
+          child: CupertinoAlertDialog(
+            title: const Text('System Requirement'),
+            content: const Text('To block numbers, OnyxDialer must be set as your default phone app.'),
+            actions: [
+              CupertinoDialogAction(
+                child: const Text('Cancel', style: TextStyle(color: _iosBlue)),
+                onPressed: () => Navigator.pop(ctx),
+              ),
+              CupertinoDialogAction(
+                child: const Text('Open Settings'),
+                onPressed: () {
+                  Navigator.pop(ctx);
+                  TelecomService.requestDefaultDialer();
+                },
+              ),
+            ],
+          ),
+        ),
+      );
+      return;
+    }
+
+    final blocked = _isNumberBlocked(number);
+    final confirmed = await showCupertinoDialog<bool>(
+      context: context,
+      builder: (ctx) => BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
+        child: CupertinoAlertDialog(
+          title: Text(blocked ? 'Unblock Number' : 'Block Number'),
+          content: Text(blocked 
+            ? 'Allow calls from ${name ?? number} again?'
+            : 'Block ${name ?? number}? You will no longer receive calls from this number.'),
+          actions: [
+            CupertinoDialogAction(
+              child: const Text('Cancel', style: TextStyle(color: _iosBlue)),
+              onPressed: () => Navigator.pop(ctx, false),
+            ),
+            CupertinoDialogAction(
+              isDestructiveAction: !blocked,
+              onPressed: () => Navigator.pop(ctx, true),
+              child: Text(blocked ? 'Unblock' : 'Block'),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (confirmed == true) {
+      try {
+        if (blocked) {
+          await FlutterContacts.blockedNumbers.unblock(number);
+        } else {
+          await FlutterContacts.blockedNumbers.block(number);
+        }
+        _fetchCallLogs();
+      } catch (e) {
+        debugPrint('Failed to update blocked status: $e');
+      }
+    }
   }
 
   Future<void> _deleteLog(CallLogEntry log) async {
@@ -432,7 +534,13 @@ class _RecentsScreenState extends State<RecentsScreen> with WidgetsBindingObserv
 
   Widget _callRow(CallLogEntry log, {required bool isLast}) {
     final missed = _isMissed(log.callType);
-    final name = (log.name?.isNotEmpty == true) ? log.name! : log.number ?? 'Unknown';
+    final blocked = _isNumberBlocked(log.number);
+    
+    String name = (log.name?.isNotEmpty == true) ? log.name! : log.number ?? 'Unknown';
+    if (log.name == null || log.name!.isEmpty) {
+      if (blocked) name = 'Blocked';
+    }
+
     final nameColor = missed ? _iosRed : _iosLabel;
     final initial = name.substring(0, 1).toUpperCase();
 
@@ -447,6 +555,22 @@ class _RecentsScreenState extends State<RecentsScreen> with WidgetsBindingObserv
           isDefaultAction: true,
           trailingIcon: CupertinoIcons.phone,
           child: const Text('Call'),
+        ),
+        CupertinoContextMenuAction(
+          onPressed: () {
+            Navigator.pop(context);
+            _handleEdit(log.number);
+          },
+          trailingIcon: CupertinoIcons.pencil,
+          child: const Text('Edit'),
+        ),
+        CupertinoContextMenuAction(
+          onPressed: () {
+            Navigator.pop(context);
+            _handleBlock(log.number, log.name);
+          },
+          trailingIcon: blocked ? CupertinoIcons.checkmark_circle : CupertinoIcons.slash_circle,
+          child: Text(blocked ? 'Unblock' : 'Block'),
         ),
         CupertinoContextMenuAction(
           onPressed: () {
@@ -502,11 +626,20 @@ class _RecentsScreenState extends State<RecentsScreen> with WidgetsBindingObserv
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(name,
-                                  style: TextStyle(
-                                      color: nameColor,
-                                      fontSize: 16,
-                                      fontWeight: FontWeight.w500)),
+                                Row(
+                                  children: [
+                                    Text(name,
+                                        style: TextStyle(
+                                            color: nameColor,
+                                            fontSize: 16,
+                                            fontWeight: FontWeight.w500)),
+                                    if (blocked)
+                                      const Padding(
+                                        padding: EdgeInsets.only(left: 6),
+                                        child: Icon(CupertinoIcons.slash_circle_fill, color: _iosRed, size: 12),
+                                      ),
+                                  ],
+                                ),
                               const SizedBox(height: 2),
                               Row(
                                 children: [
@@ -558,8 +691,6 @@ class _RecentsScreenState extends State<RecentsScreen> with WidgetsBindingObserv
   }
 }
 
-// Settings Dialog
-
 class _SettingsDialog extends StatefulWidget {
   const _SettingsDialog();
   @override
@@ -569,6 +700,7 @@ class _SettingsDialog extends StatefulWidget {
 class _SettingsDialogState extends State<_SettingsDialog> {
   bool? _isRooted;
   bool _autoRecord = false;
+  bool _blockProximity = false;
 
   @override
   void initState() {
@@ -588,13 +720,24 @@ class _SettingsDialogState extends State<_SettingsDialog> {
 
   Future<void> _loadPrefs() async {
     final prefs = await SharedPreferences.getInstance();
-    if (mounted) setState(() => _autoRecord = prefs.getBool('auto_record') ?? false);
+    if (mounted) {
+      setState(() {
+        _autoRecord = prefs.getBool('auto_record') ?? false;
+        _blockProximity = prefs.getBool('block_proximity') ?? false;
+      });
+    }
   }
 
   Future<void> _toggleAutoRecord(bool value) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('auto_record', value);
     if (mounted) setState(() => _autoRecord = value);
+  }
+
+  Future<void> _toggleBlockProximity(bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('block_proximity', value);
+    if (mounted) setState(() => _blockProximity = value);
   }
 
   @override
@@ -654,6 +797,19 @@ class _SettingsDialogState extends State<_SettingsDialog> {
             value: _autoRecord,
             activeThumbColor: _iosBlue,
             onChanged: _toggleAutoRecord,
+          ),
+          const Divider(color: _iosSeparator, height: 20),
+          const Text('Sensors',
+              style: TextStyle(color: _iosSecondary, fontSize: 12, fontWeight: FontWeight.w500)),
+          const SizedBox(height: 8),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('Block proximity sensor', style: TextStyle(color: _iosLabel)),
+            subtitle: const Text('Keeps screen on even when near ear',
+                style: TextStyle(color: _iosSecondary, fontSize: 12)),
+            value: _blockProximity,
+            activeThumbColor: _iosBlue,
+            onChanged: _toggleBlockProximity,
           ),
         ],
       ),

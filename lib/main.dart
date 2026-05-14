@@ -23,9 +23,9 @@ class OnyxDialerApp extends StatelessWidget {
       child: MaterialApp(
         title: 'Onyx Dialer',
         debugShowCheckedModeBanner: false,
-        theme: AppTheme.lightTheme, // Light mode styles
-        darkTheme: AppTheme.darkTheme, // Dark mode styles
-        themeMode: ThemeMode.system, // Automatically switch based on phone settings
+        theme: AppTheme.lightTheme,
+        darkTheme: AppTheme.darkTheme,
+        themeMode: ThemeMode.system,
         home: const HomeScreen(),
       ),
     );
