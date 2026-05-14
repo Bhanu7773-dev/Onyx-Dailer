@@ -1,20 +1,34 @@
 import 'dart:io';
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_contacts/flutter_contacts.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:intl/intl.dart';
+import 'dart:ui';
+
+const _bg           = Color(0xFF000000);
+const _card         = Color(0xFF1C1C1E);
+const _iosBlue      = Color(0xFF007AFF);
+const _iosLabel     = Color(0xFFFFFFFF);
+const _iosSecondary = Color(0xFF8E8E93);
+const _iosTertiary  = Color(0xFF48484A);
+const _iosSeparator    = Color(0xFF38383A);
+const _iosRed       = Color(0xFFFF3B30);
 
 class RecordingItem {
   final File file;
   final String number;
   final DateTime timestamp;
   Contact? contact;
+  Duration? duration;
 
   RecordingItem({
     required this.file,
     required this.number,
     required this.timestamp,
     this.contact,
+    this.duration,
   });
 }
 
@@ -27,6 +41,7 @@ class RecordingsScreen extends StatefulWidget {
 
 class _RecordingsScreenState extends State<RecordingsScreen> with WidgetsBindingObserver {
   String _searchQuery = '';
+  final TextEditingController _searchCtrl = TextEditingController();
   List<RecordingItem> _allRecordings = [];
   List<RecordingItem> _filteredRecordings = [];
   bool _isLoading = true;
@@ -37,6 +52,7 @@ class _RecordingsScreenState extends State<RecordingsScreen> with WidgetsBinding
   bool _isPlaying = false;
   Duration _duration = Duration.zero;
   Duration _position = Duration.zero;
+  RecordingItem? _expandedItem; // tracks which card is expanded
 
   @override
   void initState() {
@@ -57,7 +73,7 @@ class _RecordingsScreenState extends State<RecordingsScreen> with WidgetsBinding
       if (mounted) setState(() {
         _isPlaying = false;
         _position = Duration.zero;
-        _currentlyPlaying = null; // Reset so next tap does a fresh play
+        _currentlyPlaying = null;
       });
     });
   }
@@ -65,11 +81,11 @@ class _RecordingsScreenState extends State<RecordingsScreen> with WidgetsBinding
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _searchCtrl.dispose();
     _audioPlayer.dispose();
     super.dispose();
   }
 
-  // Auto-reload when returning from a call (app resumes)
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
@@ -161,7 +177,8 @@ class _RecordingsScreenState extends State<RecordingsScreen> with WidgetsBinding
     }
   }
 
-  Future<void> _playRecording(RecordingItem item) async {
+  Future<void> _playOrPause(RecordingItem item) async {
+    HapticFeedback.lightImpact();
     if (_currentlyPlaying?.file.path == item.file.path) {
       if (_isPlaying) {
         await _audioPlayer.pause();
@@ -179,8 +196,43 @@ class _RecordingsScreenState extends State<RecordingsScreen> with WidgetsBinding
     }
   }
 
+  Future<void> _toggleExpand(RecordingItem item) async {
+    HapticFeedback.selectionClick();
+
+    if (_expandedItem?.file.path != item.file.path) {
+      if (item.duration == null) {
+        try {
+          final tempPlayer = AudioPlayer();
+          await tempPlayer.setSourceDeviceFile(item.file.path);
+          final d = await tempPlayer.getDuration();
+          if (mounted && d != null) {
+            setState(() {
+              item.duration = d;
+            });
+          }
+          await tempPlayer.dispose();
+        } catch (_) {}
+      }
+    }
+
+    if (mounted) {
+      setState(() {
+        if (_expandedItem?.file.path == item.file.path) {
+          if (_currentlyPlaying?.file.path == item.file.path) {
+            _audioPlayer.stop();
+            _currentlyPlaying = null;
+            _isPlaying = false;
+          }
+          _expandedItem = null;
+        } else {
+          _expandedItem = item;
+        }
+      });
+    }
+  }
+
   Future<void> _deleteRecording(RecordingItem item) async {
-    // Stop playback if this file is playing
+    HapticFeedback.mediumImpact();
     if (_currentlyPlaying?.file.path == item.file.path) {
       await _audioPlayer.stop();
       setState(() {
@@ -189,24 +241,25 @@ class _RecordingsScreenState extends State<RecordingsScreen> with WidgetsBinding
       });
     }
 
-    final confirmed = await showDialog<bool>(
+    final confirmed = await showCupertinoDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Delete Recording'),
-        content: Text(
-          'Delete the recording for ${item.contact?.displayName ?? item.number}?\nThis cannot be undone.',
+      builder: (ctx) => BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
+        child: CupertinoAlertDialog(
+          title: const Text('Delete Recording'),
+          content: Text('Delete the recording for ${item.contact?.displayName ?? item.number}?\nThis cannot be undone.'),
+          actions: [
+            CupertinoDialogAction(
+              child: const Text('Cancel', style: TextStyle(color: _iosBlue)),
+              onPressed: () => Navigator.pop(ctx, false),
+            ),
+            CupertinoDialogAction(
+              isDestructiveAction: true,
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Delete'),
+            ),
+          ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: Colors.red),
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Delete'),
-          ),
-        ],
       ),
     );
 
@@ -217,17 +270,8 @@ class _RecordingsScreenState extends State<RecordingsScreen> with WidgetsBinding
           _allRecordings.remove(item);
           _filterRecordings();
         });
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Recording deleted'), duration: Duration(seconds: 2)),
-          );
-        }
       } catch (e) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Failed to delete: $e')),
-          );
-        }
+        debugPrint('Failed to delete: $e');
       }
     }
   }
@@ -240,153 +284,337 @@ class _RecordingsScreenState extends State<RecordingsScreen> with WidgetsBinding
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
-    return Scaffold(
-      body: SafeArea(
-        child: Column(
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-              child: SearchBar(
-                hintText: 'Search recordings',
-                elevation: const WidgetStatePropertyAll(0),
-                backgroundColor: WidgetStatePropertyAll(
-                    theme.colorScheme.secondaryContainer.withValues(alpha: 0.5)),
-                leading: const Padding(
-                  padding: EdgeInsets.only(left: 8.0),
-                  child: Icon(Icons.search),
-                ),
-                onChanged: (value) {
-                  setState(() {
-                    _searchQuery = value;
-                    _filterRecordings();
-                  });
-                },
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: const SystemUiOverlayStyle(
+        statusBarColor: Colors.transparent,
+        statusBarIconBrightness: Brightness.light,
+        systemNavigationBarColor: _bg,
+        systemNavigationBarIconBrightness: Brightness.light,
+      ),
+      child: Scaffold(
+        backgroundColor: _bg,
+        body: SafeArea(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Padding(
+                padding: EdgeInsets.fromLTRB(20, 12, 20, 10),
+                child: Text('Recordings',
+                    style: TextStyle(
+                      fontSize: 34,
+                      fontWeight: FontWeight.w700,
+                      color: _iosLabel,
+                      letterSpacing: -0.5,
+                    )),
               ),
-            ),
-            if (_isLoading)
-              const Expanded(child: Center(child: CircularProgressIndicator()))
-            else if (_allRecordings.isEmpty)
-              Expanded(
-                child: Center(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
+
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                child: Container(
+                  height: 36,
+                  decoration: BoxDecoration(
+                    color: _card,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Row(
                     children: [
-                      Icon(Icons.mic_none, size: 64, color: theme.colorScheme.outline),
-                      const SizedBox(height: 12),
-                      Text('No recordings yet', style: theme.textTheme.titleMedium),
-                      const SizedBox(height: 4),
-                      Text('Tap Record during a call to save audio',
-                          style: theme.textTheme.bodySmall?.copyWith(
-                              color: theme.colorScheme.outline)),
+                      const Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 8),
+                        child: Icon(Icons.search_rounded,
+                            color: _iosSecondary, size: 18),
+                      ),
+                      Expanded(
+                        child: TextField(
+                          controller: _searchCtrl,
+                          onChanged: (v) {
+                            setState(() {
+                              _searchQuery = v;
+                              _filterRecordings();
+                            });
+                          },
+                          style: const TextStyle(color: _iosLabel, fontSize: 15),
+                          decoration: const InputDecoration(
+                            hintText: 'Search recordings',
+                            hintStyle: TextStyle(color: _iosSecondary, fontSize: 15),
+                            border: InputBorder.none,
+                            isDense: true,
+                            contentPadding: EdgeInsets.symmetric(vertical: 8),
+                          ),
+                          cursorColor: _iosBlue,
+                        ),
+                      ),
+                      if (_searchQuery.isNotEmpty)
+                        GestureDetector(
+                          onTap: () {
+                            _searchCtrl.clear();
+                            setState(() {
+                              _searchQuery = '';
+                              _filterRecordings();
+                            });
+                            FocusScope.of(context).unfocus();
+                          },
+                          child: const Padding(
+                            padding: EdgeInsets.symmetric(horizontal: 8),
+                            child: Icon(Icons.cancel, color: _iosSecondary, size: 18),
+                          ),
+                        ),
                     ],
                   ),
                 ),
-              )
-            else
-              Expanded(
-                child: RefreshIndicator(
-                  onRefresh: _loadRecordings,
-                  child: ListView.builder(
-                    physics: const AlwaysScrollableScrollPhysics(),
-                    itemCount: _filteredRecordings.length,
-                    itemBuilder: (context, index) {
-                      final item = _filteredRecordings[index];
-                      final isPlayingThis =
-                          _currentlyPlaying?.file.path == item.file.path;
-                      final displayName =
-                          item.contact?.displayName ?? item.number;
-                      final dateStr =
-                          DateFormat('MMM d, yyyy • h:mm a').format(item.timestamp);
-                      final fileSizeMb =
-                          (item.file.lengthSync() / 1024 / 1024).toStringAsFixed(2);
+              ),
 
-                      return Card(
-                        margin: const EdgeInsets.symmetric(
-                            horizontal: 16, vertical: 4),
-                        elevation: 0,
-                        color: isPlayingThis
-                            ? theme.colorScheme.primaryContainer
-                                .withValues(alpha: 0.4)
-                            : theme.colorScheme.surfaceContainerHighest
-                                .withValues(alpha: 0.3),
-                        shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(16)),
-                        child: Column(
-                          children: [
-                            ListTile(
-                              leading: CircleAvatar(
-                                backgroundColor:
-                                    theme.colorScheme.primaryContainer,
-                                child: Icon(Icons.mic,
-                                    color: theme.colorScheme.onPrimaryContainer),
-                              ),
-                              title: Text(displayName,
-                                  style: const TextStyle(
-                                      fontWeight: FontWeight.bold)),
-                              subtitle: Text('$dateStr • ${fileSizeMb}MB'),
-                              trailing: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  IconButton(
-                                    icon: Icon(
-                                      isPlayingThis && _isPlaying
-                                          ? Icons.pause_circle_filled
-                                          : Icons.play_circle_fill,
-                                      size: 34,
-                                      color: theme.colorScheme.primary,
-                                    ),
-                                    onPressed: () => _playRecording(item),
-                                  ),
-                                  IconButton(
-                                    icon: const Icon(Icons.delete_outline,
-                                        color: Colors.red),
-                                    onPressed: () => _deleteRecording(item),
-                                  ),
-                                ],
-                              ),
-                              onTap: () => _playRecording(item),
-                            ),
-                            if (isPlayingThis)
-                              Padding(
-                                padding:
-                                    const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                                child: Column(
-                                  children: [
-                                    Slider(
-                                      value: _position.inMilliseconds.toDouble(),
-                                      min: 0.0,
-                                      max: _duration.inMilliseconds.toDouble() > 0
-                                          ? _duration.inMilliseconds.toDouble()
-                                          : 1.0,
-                                      onChanged: (value) {
-                                        _audioPlayer.seek(Duration(
-                                            milliseconds: value.toInt()));
-                                      },
-                                    ),
-                                    Row(
-                                      mainAxisAlignment:
-                                          MainAxisAlignment.spaceBetween,
-                                      children: [
-                                        Text(_formatDuration(_position),
-                                            style: theme.textTheme.bodySmall),
-                                        Text(_formatDuration(_duration),
-                                            style: theme.textTheme.bodySmall),
-                                      ],
-                                    ),
-                                  ],
+              Expanded(
+                child: _isLoading
+                    ? const Center(child: CircularProgressIndicator(color: _iosBlue))
+                    : _allRecordings.isEmpty
+                        ? const Center(
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(CupertinoIcons.mic_slash, size: 60, color: _iosTertiary),
+                                SizedBox(height: 12),
+                                Text(
+                                  'No recordings yet',
+                                  style: TextStyle(color: _iosSecondary, fontSize: 16),
                                 ),
-                              ),
+                              ],
+                            ),
+                          )
+                        : RefreshIndicator(
+                            onRefresh: _loadRecordings,
+                            color: _iosBlue,
+                            backgroundColor: _card,
+                            child: ListView.builder(
+                              physics: const AlwaysScrollableScrollPhysics(),
+                              padding: const EdgeInsets.only(left: 16, right: 16, bottom: 100),
+                              itemCount: _filteredRecordings.length,
+                              itemBuilder: (context, index) {
+                                final item = _filteredRecordings[index];
+                                final isExpanded = _expandedItem?.file.path == item.file.path;
+                                final isPlayingThis = _currentlyPlaying?.file.path == item.file.path;
+                                final isLast = index == _filteredRecordings.length - 1;
+                                final isFirst = index == 0;
+                                
+                                return _buildRecordingItem(item, isExpanded, isPlayingThis, isFirst, isLast);
+                              },
+                            ),
+                          ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildRecordingItem(RecordingItem item, bool isExpanded, bool isPlayingThis, bool isFirst, bool isLast) {
+    final displayName = item.contact?.displayName ?? item.number;
+    final dateStr = DateFormat('MMM d, yyyy • h:mm a').format(item.timestamp);
+    final fileSizeMb = (item.file.lengthSync() / 1024 / 1024).toStringAsFixed(2);
+    final initial = displayName.trim().isEmpty ? '#' : displayName.trim()[0].toUpperCase();
+
+    final content = Material(
+      color: Colors.transparent,
+      child: Container(
+        decoration: BoxDecoration(
+          color: _card,
+          borderRadius: BorderRadius.vertical(
+            top: isFirst ? const Radius.circular(13) : Radius.zero,
+            bottom: isLast ? const Radius.circular(13) : Radius.zero,
+          ),
+        ),
+        child: Column(
+          children: [
+            GestureDetector(
+              onTap: () => _toggleExpand(item),
+              behavior: HitTestBehavior.opaque,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(14, 12, 12, 12),
+                child: Row(
+                  children: [
+                    CircleAvatar(
+                      radius: 20,
+                      backgroundColor: _iosTertiary,
+                      child: Text(
+                        initial,
+                        style: const TextStyle(fontSize: 16, color: _iosLabel, fontWeight: FontWeight.w500),
+                      ),
+                    ),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(displayName,
+                              style: const TextStyle(color: _iosLabel, fontSize: 17, fontWeight: FontWeight.w500)),
+                          const SizedBox(height: 2),
+                          Text('$dateStr • ${fileSizeMb}MB',
+                              style: const TextStyle(color: _iosSecondary, fontSize: 13)),
+                        ],
+                      ),
+                    ),
+                    Icon(
+                      isExpanded ? CupertinoIcons.chevron_up : CupertinoIcons.chevron_down,
+                      color: _iosSecondary,
+                      size: 16,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+
+            if (isExpanded)
+              GestureDetector(
+                onTap: () {}, 
+                behavior: HitTestBehavior.opaque,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+                  child: Column(
+                    children: [
+                      SliderTheme(
+                        data: SliderThemeData(
+                          trackHeight: 2,
+                          thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
+                          overlayShape: const RoundSliderOverlayShape(overlayRadius: 14),
+                          activeTrackColor: _iosBlue,
+                          inactiveTrackColor: _iosTertiary,
+                          thumbColor: _iosLabel,
+                        ),
+                        child: Slider(
+                          value: isPlayingThis ? _position.inMilliseconds.toDouble() : 0,
+                          min: 0.0,
+                          max: isPlayingThis && _duration.inMilliseconds > 0
+                              ? _duration.inMilliseconds.toDouble()
+                              : 1.0,
+                          onChanged: isPlayingThis
+                              ? (value) => _audioPlayer.seek(Duration(milliseconds: value.toInt()))
+                              : null,
+                        ),
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(isPlayingThis ? _formatDuration(_position) : '00:00',
+                                style: const TextStyle(color: _iosSecondary, fontSize: 12)),
+                            Text(
+                                isPlayingThis
+                                    ? '-${_formatDuration(_duration - _position)}'
+                                    : (item.duration != null ? _formatDuration(item.duration!) : '--:--'),
+                                style: const TextStyle(color: _iosSecondary, fontSize: 12)),
                           ],
                         ),
-                      );
-                    },
+                      ),
+                      const SizedBox(height: 12),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          GestureDetector(
+                            onTap: () => _deleteRecording(item),
+                            behavior: HitTestBehavior.opaque,
+                            child: Container(
+                              padding: const EdgeInsets.all(12),
+                              child: const Icon(CupertinoIcons.trash, color: _iosRed, size: 24),
+                            ),
+                          ),
+                          const Spacer(),
+                          GestureDetector(
+                            onTap: () {
+                              if (isPlayingThis) {
+                                final newPos = _position - const Duration(seconds: 15);
+                                _audioPlayer.seek(newPos < Duration.zero ? Duration.zero : newPos);
+                              }
+                            },
+                            behavior: HitTestBehavior.opaque,
+                            child: Container(
+                              padding: const EdgeInsets.all(12),
+                              child: Icon(CupertinoIcons.gobackward_15,
+                                  color: isPlayingThis ? _iosLabel : _iosTertiary, size: 28),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          GestureDetector(
+                            onTap: () => _playOrPause(item),
+                            behavior: HitTestBehavior.opaque,
+                            child: Container(
+                              padding: const EdgeInsets.all(12),
+                              child: Icon(
+                                isPlayingThis && _isPlaying
+                                    ? CupertinoIcons.pause_circle_fill
+                                    : CupertinoIcons.play_circle_fill,
+                                color: _iosLabel,
+                                size: 56,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          GestureDetector(
+                            onTap: () {
+                              if (isPlayingThis) {
+                                final newPos = _position + const Duration(seconds: 15);
+                                _audioPlayer.seek(newPos > _duration ? _duration : newPos);
+                              }
+                            },
+                            behavior: HitTestBehavior.opaque,
+                            child: Container(
+                              padding: const EdgeInsets.all(12),
+                              child: Icon(CupertinoIcons.goforward_15,
+                                  color: isPlayingThis ? _iosLabel : _iosTertiary, size: 28),
+                            ),
+                          ),
+                          const Spacer(),
+                          const SizedBox(width: 48),
+                        ],
+                      ),
+                    ],
                   ),
                 ),
               ),
+
+            if (!isLast)
+              Container(
+                margin: const EdgeInsets.only(left: 68),
+                height: 0.5,
+                color: _iosSeparator,
+              ),
           ],
         ),
+      ),
+    );
+
+    if (isExpanded) {
+      return SizedBox(
+        width: MediaQuery.of(context).size.width - 32,
+        child: content,
+      );
+    }
+
+    return CupertinoContextMenu(
+      enableHapticFeedback: true,
+      actions: <Widget>[
+        CupertinoContextMenuAction(
+          onPressed: () {
+            Navigator.pop(context);
+            _playOrPause(item);
+          },
+          isDefaultAction: true,
+          trailingIcon: isPlayingThis && _isPlaying ? CupertinoIcons.pause : CupertinoIcons.play,
+          child: Text(isPlayingThis && _isPlaying ? 'Pause' : 'Play'),
+        ),
+        CupertinoContextMenuAction(
+          onPressed: () {
+            Navigator.pop(context);
+            _deleteRecording(item);
+          },
+          isDestructiveAction: true,
+          trailingIcon: CupertinoIcons.trash,
+          child: const Text('Delete'),
+        ),
+      ],
+      child: SizedBox(
+        width: MediaQuery.of(context).size.width - 32,
+        child: content,
       ),
     );
   }

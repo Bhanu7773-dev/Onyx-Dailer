@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/services.dart';
 import 'package:call_log/call_log.dart';
 import 'package:intl/intl.dart';
@@ -7,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:wavedialer/screens/call_screen.dart';
 import 'package:wavedialer/services/telecom_service.dart';
+import 'package:wavedialer/widgets/contact_details_sheet.dart';
 
 // iOS Color Constants
 const _iosBlue = Color(0xFF007AFF);
@@ -28,14 +30,28 @@ class RecentsScreen extends StatefulWidget {
   State<RecentsScreen> createState() => _RecentsScreenState();
 }
 
-class _RecentsScreenState extends State<RecentsScreen> {
+class _RecentsScreenState extends State<RecentsScreen> with WidgetsBindingObserver {
   List<CallLogEntry>? _callLogs;
   _Filter _filter = _Filter.all;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _fetchCallLogs();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _fetchCallLogs();
+    }
   }
 
   Future<void> _fetchCallLogs() async {
@@ -163,113 +179,46 @@ class _RecentsScreenState extends State<RecentsScreen> {
     );
   }
 
-  void _dial(String? number) {
+  Future<void> _dial(String? number) async {
     if (number == null || number.isEmpty) return;
     HapticFeedback.lightImpact();
     TelecomService.makeCall(number);
-    Navigator.push(
+    await Navigator.push(
       context,
       MaterialPageRoute(builder: (_) => CallScreen(initialNumber: number)),
     );
+    _fetchCallLogs();
   }
 
-  void _showCallDetails(CallLogEntry log) {
-    final isMissed = _isMissed(log.callType);
+  Future<void> _openDetails(CallLogEntry log) async {
     final name = (log.name?.isNotEmpty == true) ? log.name! : log.number ?? 'Unknown';
-    final dt = DateTime.fromMillisecondsSinceEpoch(log.timestamp ?? 0);
-
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: _iosCard,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(12)),
-      ),
-      builder: (_) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 0, vertical: 8),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // Handle
-              Container(
-                width: 36, height: 4,
-                margin: const EdgeInsets.only(bottom: 16),
-                decoration: BoxDecoration(
-                  color: _iosTertiary,
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-              // Avatar
-              CircleAvatar(
-                radius: 36,
-                backgroundColor: _iosTertiary,
-                child: Text(
-                  name.substring(0, 1).toUpperCase(),
-                  style: const TextStyle(fontSize: 28, color: _iosLabel, fontWeight: FontWeight.w600),
-                ),
-              ),
-              const SizedBox(height: 8),
-              Text(name, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w600, color: _iosLabel)),
-              const SizedBox(height: 4),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(_callTypeIcon(log.callType), size: 13,
-                      color: isMissed ? _iosRed : _iosSecondary),
-                  const SizedBox(width: 4),
-                  Text(
-                    '${_callTypeLabel(log.callType)} · ${DateFormat('MMM d, h:mm a').format(dt)}',
-                    style: TextStyle(color: isMissed ? _iosRed : _iosSecondary, fontSize: 14),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 20),
-              // Call button
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 20),
-                child: _iosActionButton(
-                  icon: Icons.call_rounded,
-                  label: 'Call Back',
-                  color: _iosBlue,
-                  onTap: () {
-                    Navigator.pop(context);
-                    _dial(log.number);
-                  },
-                ),
-              ),
-              const SizedBox(height: 12),
-            ],
-          ),
-        ),
-      ),
+    if (log.number == null || log.number!.isEmpty) return;
+    await showContactDetails(
+      context,
+      name: name,
+      phone: log.number!,
     );
+    _fetchCallLogs();
   }
 
-  Widget _iosActionButton({
-    required IconData icon,
-    required String label,
-    required Color color,
-    required VoidCallback onTap,
-  }) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        width: double.infinity,
-        padding: const EdgeInsets.symmetric(vertical: 14),
-        decoration: BoxDecoration(
-          color: color.withValues(alpha: 0.15),
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(icon, color: color, size: 20),
-            const SizedBox(width: 8),
-            Text(label, style: TextStyle(color: color, fontSize: 17, fontWeight: FontWeight.w500)),
-          ],
-        ),
-      ),
-    );
+  Future<void> _deleteLog(CallLogEntry log) async {
+    HapticFeedback.mediumImpact();
+    // For now, we remove it from the local list. 
+    // Since we are a root app, we could potentially delete from system provider here.
+    setState(() {
+      _callLogs?.removeWhere((e) => e.timestamp == log.timestamp && e.number == log.number);
+    });
+    
+    // Optional: Try system delete if root is available
+    try {
+      final id = log.timestamp; // We use timestamp as a pseudo-id if real id is missing
+      if (id != null) {
+        // This is a placeholder for actual system deletion logic if needed
+        debugPrint('Attempting to delete log entry at $id');
+      }
+    } catch (e) {
+      debugPrint('System delete failed: $e');
+    }
   }
 
   @override
@@ -487,91 +436,125 @@ class _RecentsScreenState extends State<RecentsScreen> {
     final nameColor = missed ? _iosRed : _iosLabel;
     final initial = name.substring(0, 1).toUpperCase();
 
-    return GestureDetector(
-      onTap: () => _dial(log.number),
-      child: Container(
-        color: Colors.transparent,
-        padding: const EdgeInsets.fromLTRB(14, 0, 0, 0),
-        child: Row(
-          children: [
-            // Grey avatar — iOS style
-            CircleAvatar(
-              radius: 22,
-              backgroundColor: _iosTertiary,
-              child: Text(
-                initial,
-                style: const TextStyle(
-                  fontSize: 18,
-                  color: _iosLabel,
-                  fontWeight: FontWeight.w500,
+    return CupertinoContextMenu(
+      enableHapticFeedback: true,
+      actions: <Widget>[
+        CupertinoContextMenuAction(
+          onPressed: () {
+            Navigator.pop(context);
+            _dial(log.number);
+          },
+          isDefaultAction: true,
+          trailingIcon: CupertinoIcons.phone,
+          child: const Text('Call'),
+        ),
+        CupertinoContextMenuAction(
+          onPressed: () {
+            Navigator.pop(context);
+            _deleteLog(log);
+          },
+          isDestructiveAction: true,
+          trailingIcon: CupertinoIcons.trash,
+          child: const Text('Delete'),
+        ),
+      ],
+      child: SizedBox(
+        width: MediaQuery.of(context).size.width - 32,
+        child: GestureDetector(
+          onTap: () => _dial(log.number),
+          child: Material(
+          color: Colors.transparent,
+          child: Container(
+            color: _iosCard,
+            padding: const EdgeInsets.fromLTRB(14, 0, 0, 0),
+            child: Row(
+              children: [
+                // Grey avatar — iOS style
+                GestureDetector(
+                  onTap: () => _openDetails(log),
+                  child: CircleAvatar(
+                    radius: 22,
+                    backgroundColor: _iosTertiary,
+                    child: Text(
+                      initial,
+                      style: const TextStyle(
+                        fontSize: 18,
+                        color: _iosLabel,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ),
                 ),
-              ),
-            ),
-            const SizedBox(width: 12),
+                const SizedBox(width: 12),
 
-            // Name + subtitle
-            Expanded(
-              child: Container(
-                padding: const EdgeInsets.symmetric(vertical: 13),
-                decoration: BoxDecoration(
-                  border: isLast
-                      ? null
-                      : const Border(bottom: BorderSide(color: _iosSeparator, width: 0.4)),
-                ),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(name,
-                              style: TextStyle(
-                                  color: nameColor,
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.w500)),
-                          const SizedBox(height: 2),
-                          Row(
+                // Name + subtitle
+                Expanded(
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(vertical: 13),
+                    decoration: BoxDecoration(
+                      border: isLast
+                          ? null
+                          : const Border(bottom: BorderSide(color: _iosSeparator, width: 0.4)),
+                    ),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Icon(_callTypeIcon(log.callType),
-                                  size: 11, color: missed ? _iosRed : _iosSecondary),
-                              const SizedBox(width: 4),
-                              Text(
-                                _callTypeLabel(log.callType),
-                                style: TextStyle(
-                                    color: missed ? _iosRed : _iosSecondary,
-                                    fontSize: 12),
+                              Text(name,
+                                  style: TextStyle(
+                                      color: nameColor,
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w500)),
+                              const SizedBox(height: 2),
+                              Row(
+                                children: [
+                                  Icon(_callTypeIcon(log.callType),
+                                      size: 11, color: missed ? _iosRed : _iosSecondary),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    _callTypeLabel(log.callType),
+                                    style: TextStyle(
+                                        color: missed ? _iosRed : _iosSecondary,
+                                        fontSize: 12),
+                                  ),
+                                ],
                               ),
                             ],
                           ),
-                        ],
-                      ),
-                    ),
+                        ),
 
-                    // Time
-                    Text(
-                      _formatTime(log.timestamp),
-                      style: const TextStyle(color: _iosSecondary, fontSize: 13),
-                    ),
-                    const SizedBox(width: 6),
+                        // Time
+                        Text(
+                          _formatTime(log.timestamp),
+                          style: const TextStyle(color: _iosSecondary, fontSize: 13),
+                        ),
+                        const SizedBox(width: 6),
 
-                    // Info button
-                    GestureDetector(
-                      onTap: () => _showCallDetails(log),
-                      child: Container(
-                        width: 40, height: 44,
-                        alignment: Alignment.center,
-                        child: const Icon(Icons.info_outline_rounded,
-                            color: _iosBlue, size: 20),
-                      ),
+                        // Info button
+                        GestureDetector(
+                          onTap: () => _openDetails(log),
+                          behavior: HitTestBehavior.opaque,
+                          child: Container(
+                            width: 56, height: 56,
+                            color: Colors.transparent,
+                            alignment: Alignment.center,
+                            child: const Icon(Icons.info_outline_rounded,
+                                color: _iosBlue, size: 22),
+                          ),
+                        ),
+                      ],
                     ),
-                  ],
+                  ),
                 ),
-              ),
+              ],
             ),
-          ],
+          ),
         ),
       ),
-    );
+    ),
+  );
   }
 }
 

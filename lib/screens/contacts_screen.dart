@@ -4,6 +4,7 @@ import 'package:flutter_contacts/flutter_contacts.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:wavedialer/screens/call_screen.dart';
 import 'package:wavedialer/services/telecom_service.dart';
+import 'package:wavedialer/widgets/contact_details_sheet.dart';
 
 // ── iOS colours ────────────────────────────────────────────────────────────
 const _bg           = Color(0xFF000000);
@@ -311,14 +312,17 @@ class _ContactsScreenState extends State<ContactsScreen> {
         padding: const EdgeInsets.fromLTRB(14, 0, 0, 0),
         child: Row(
           children: [
-            CircleAvatar(
-              radius: 18,
-              backgroundColor: _iosTertiary,
-              child: Text(initial,
-                  style: const TextStyle(
-                      fontSize: 15,
-                      color: _iosLabel,
-                      fontWeight: FontWeight.w500)),
+            GestureDetector(
+              onTap: phone != null ? () => showContactDetails(context, name: name, phone: phone, avatarColor: _iosTertiary, avatarTextColor: _iosLabel) : null,
+              child: CircleAvatar(
+                radius: 18,
+                backgroundColor: _iosTertiary,
+                child: Text(initial,
+                    style: const TextStyle(
+                        fontSize: 15,
+                        color: _iosLabel,
+                        fontWeight: FontWeight.w500)),
+              ),
             ),
             const SizedBox(width: 12),
             Expanded(
