@@ -23,8 +23,11 @@ import android.os.IBinder
 import android.content.ComponentName
 
 class MainActivity: FlutterActivity() {
-    private val METHOD_CHANNEL = "dark.onyx.com/telecom_commands"
-    private val EVENT_CHANNEL = "dark.onyx.com/telecom_events"
+    companion object {
+        private const val METHOD_CHANNEL = "dark.onyx.com/telecom_commands"
+        private const val EVENT_CHANNEL = "dark.onyx.com/telecom_events"
+        var isAppVisible = false
+    }
     private var eventSink: EventChannel.EventSink? = null
     private var toneGenerator: ToneGenerator? = null
     private var callRecorderService: ICallRecorderService? = null
@@ -58,9 +61,37 @@ class MainActivity: FlutterActivity() {
         }
     }
 
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        if (intent.getBooleanExtra("incoming_call", false)) {
+            turnScreenOnAndKeyguardOff()
+        }
+    }
+
+    private fun turnScreenOnAndKeyguardOff() {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O_MR1) {
+            setShowWhenLocked(true)
+            setTurnScreenOn(true)
+            val keyguardManager = getSystemService(android.content.Context.KEYGUARD_SERVICE) as android.app.KeyguardManager
+            keyguardManager.requestDismissKeyguard(this, null)
+        } else {
+            window.addFlags(
+                android.view.WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
+                android.view.WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD or
+                android.view.WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON or
+                android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
+            )
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         
+        if (intent.getBooleanExtra("incoming_call", false)) {
+            turnScreenOnAndKeyguardOff()
+        }
+
         WindowCompat.setDecorFitsSystemWindows(window, false)
         window.navigationBarColor = 0x00000000 
         window.statusBarColor = 0x00000000 
@@ -69,6 +100,46 @@ class MainActivity: FlutterActivity() {
             window.isNavigationBarContrastEnforced = false
             window.isStatusBarContrastEnforced = false
         }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        isAppVisible = true
+    }
+
+    override fun onResume() {
+        super.onResume()
+        isAppVisible = true
+    }
+
+    override fun onPause() {
+        super.onPause()
+        isAppVisible = false
+    }
+
+    override fun onStop() {
+        super.onStop()
+        isAppVisible = false
+    }
+
+    private fun resolveContactName(number: String): String? {
+        if (number == "Unknown") return null
+        try {
+            val uri = android.net.Uri.withAppendedPath(android.provider.ContactsContract.PhoneLookup.CONTENT_FILTER_URI, android.net.Uri.encode(number))
+            val cursor = contentResolver.query(uri, arrayOf(android.provider.ContactsContract.PhoneLookup.DISPLAY_NAME), null, null, null)
+            if (cursor != null && cursor.moveToFirst()) {
+                val index = cursor.getColumnIndex(android.provider.ContactsContract.PhoneLookup.DISPLAY_NAME)
+                if (index != -1) {
+                    val name = cursor.getString(index)
+                    cursor.close()
+                    return name
+                }
+                cursor.close()
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+        return null
     }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -86,10 +157,27 @@ class MainActivity: FlutterActivity() {
                     requestDefaultDialer()
                     result.success(null)
                 }
+                "getSimCards" -> {
+                    val telecomManager = getSystemService(Context.TELECOM_SERVICE) as TelecomManager
+                    if (checkSelfPermission(android.Manifest.permission.READ_PHONE_STATE) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                        val accounts = telecomManager.callCapablePhoneAccounts
+                        val sims = accounts.mapIndexed { index, handle ->
+                            val account = telecomManager.getPhoneAccount(handle)
+                            mapOf(
+                                "id" to handle.id,
+                                "label" to (account?.label?.toString() ?: "SIM ${index + 1}")
+                            )
+                        }
+                        result.success(sims)
+                    } else {
+                        result.success(emptyList<Map<String, String>>())
+                    }
+                }
                 "makeCall" -> {
                     val number = call.argument<String>("number")
+                    val simId = call.argument<String>("simId")
                     if (number != null) {
-                        makeCall(number)
+                        makeCall(number, simId)
                     }
                     result.success(null)
                 }
@@ -123,10 +211,12 @@ class MainActivity: FlutterActivity() {
                 }
                 "setHold" -> {
                     val enabled = call.argument<Boolean>("enabled") ?: false
-                    if (enabled) {
-                        CallService.currentCall?.hold()
-                    } else {
-                        CallService.currentCall?.unhold()
+                    CallService.currentCall?.let {
+                        if (enabled && it.state == Call.STATE_ACTIVE) {
+                            it.hold()
+                        } else if (!enabled && it.state == Call.STATE_HOLDING) {
+                            it.unhold()
+                        }
                     }
                     result.success(null)
                 }
@@ -180,6 +270,27 @@ class MainActivity: FlutterActivity() {
                     callRecorderService?.stopRecording()
                     result.success(null)
                 }
+                "isIncomingCallLaunch" -> {
+                    val isIncoming = intent.getBooleanExtra("incoming_call", false)
+                    intent.removeExtra("incoming_call") // Clear the extra so it doesn't trigger again on normal manual opens
+                    if (isIncoming) {
+                        val number = intent.getStringExtra("incoming_number") ?: "Unknown"
+                        val state = intent.getIntExtra("incoming_state", 2)
+                        
+                        // Fast native contact lookup
+                        val contactName = resolveContactName(number)
+                        
+                        val map = mapOf(
+                            "isIncoming" to true,
+                            "number" to number,
+                            "state" to state,
+                            "name" to contactName
+                        )
+                        result.success(map)
+                    } else {
+                        result.success(mapOf("isIncoming" to false))
+                    }
+                }
                 "isShizukuServiceRunning" -> {
                     result.success(callRecorderService != null)
                 }
@@ -193,17 +304,21 @@ class MainActivity: FlutterActivity() {
                     eventSink = events
                     CallService.listener = { call, state ->
                         runOnUiThread {
+                            val num = call.details.handle?.schemeSpecificPart ?: "Unknown"
                             val data = mapOf(
                                 "state" to state,
-                                "number" to (call.details.handle?.schemeSpecificPart ?: "Unknown")
+                                "number" to num,
+                                "name" to resolveContactName(num)
                             )
                             eventSink?.success(data)
                         }
                     }
                     CallService.currentCall?.let {
+                        val num = it.details.handle?.schemeSpecificPart ?: "Unknown"
                         val data = mapOf(
                             "state" to it.state,
-                            "number" to (it.details.handle?.schemeSpecificPart ?: "Unknown")
+                            "number" to num,
+                            "name" to resolveContactName(num)
                         )
                         eventSink?.success(data)
                     }
@@ -231,11 +346,34 @@ class MainActivity: FlutterActivity() {
         }
     }
 
-    private fun makeCall(number: String) {
+    private fun makeCall(number: String, simId: String?) {
         val telecomManager = getSystemService(Context.TELECOM_SERVICE) as TelecomManager
         val uri = Uri.fromParts("tel", number, null)
         val extras = Bundle()
+        
         try {
+            // Check for permissions
+            if (checkSelfPermission(android.Manifest.permission.READ_PHONE_STATE) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                var selectedAccount: android.telecom.PhoneAccountHandle? = null
+                
+                // If a specific sim is requested
+                if (simId != null) {
+                    val accounts = telecomManager.callCapablePhoneAccounts
+                    selectedAccount = accounts.find { it.id == simId }
+                }
+                
+                // If we have a selected account, use it
+                if (selectedAccount != null) {
+                    extras.putParcelable(TelecomManager.EXTRA_PHONE_ACCOUNT_HANDLE, selectedAccount)
+                }
+                // If simId is null or not found, do NOT put any EXTRA_PHONE_ACCOUNT_HANDLE
+                // This forces Android to show the "Select SIM" popup (Ask Every Time)
+                // UNLESS there is only one SIM
+                else if (telecomManager.callCapablePhoneAccounts.size == 1) {
+                    extras.putParcelable(TelecomManager.EXTRA_PHONE_ACCOUNT_HANDLE, telecomManager.callCapablePhoneAccounts[0])
+                }
+            }
+            
             telecomManager.placeCall(uri, extras)
         } catch (e: SecurityException) {
             e.printStackTrace()

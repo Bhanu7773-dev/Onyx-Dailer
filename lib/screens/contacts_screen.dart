@@ -45,7 +45,9 @@ class _ContactsScreenState extends State<ContactsScreen> {
   @override
   void initState() {
     super.initState();
-    _fetchContacts();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _fetchContacts();
+    });
   }
 
   @override
@@ -59,9 +61,15 @@ class _ContactsScreenState extends State<ContactsScreen> {
   
   Future<void> _fetchContacts() async {
     if (await Permission.contacts.isGranted) {
-      final contacts = await FlutterContacts.getAll(
-          properties: {ContactProperty.phone});
-      
+      // Parallelize fetching contacts and blocked numbers
+      final results = await Future.wait([
+        FlutterContacts.getAll(properties: {ContactProperty.phone}),
+        FlutterContacts.blockedNumbers.isAvailable(),
+      ]);
+
+      final contacts = results[0] as List<Contact>;
+      final isBlockedAvailable = results[1] as bool;
+
       // Only keep contacts that actually have a phone number
       final validContacts = contacts.where((c) => c.phones.isNotEmpty).toList();
 
@@ -70,12 +78,12 @@ class _ContactsScreenState extends State<ContactsScreen> {
               .compareTo((b.displayName ?? '').toLowerCase()));
 
       Set<String> blockedNums = {};
-      try {
-        if (await FlutterContacts.blockedNumbers.isAvailable()) {
+      if (isBlockedAvailable) {
+        try {
           final blocked = await FlutterContacts.blockedNumbers.getAll();
           blockedNums = blocked.map((p) => p.number.replaceAll(RegExp(r'\D'), '')).toSet();
-        }
-      } catch (_) {}
+        } catch (_) {}
+      }
 
       if (mounted) {
         setState(() {
@@ -148,9 +156,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
   void _dial(String number) {
     _searchFocus.unfocus();
     HapticFeedback.lightImpact();
-    TelecomService.makeCall(number);
-    Navigator.push(context,
-        MaterialPageRoute(builder: (_) => CallScreen(initialNumber: number)));
+    TelecomService.handleOutgoingCall(context, number);
   }
 
   void _handleCall(Contact contact) {
@@ -579,11 +585,15 @@ class _ContactsScreenState extends State<ContactsScreen> {
                           Expanded(
                             child: Row(
                               children: [
-                                Text(name,
-                                    style: const TextStyle(
-                                        color: _iosLabel,
-                                        fontSize: 16,
-                                        fontWeight: FontWeight.w400)),
+                                Flexible(
+                                  child: Text(name,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                          color: _iosLabel,
+                                          fontSize: 16,
+                                          fontWeight: FontWeight.w400)),
+                                ),
                                 if (_isContactBlocked(contact))
                                   const Padding(
                                     padding: EdgeInsets.only(left: 6),

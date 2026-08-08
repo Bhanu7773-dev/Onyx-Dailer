@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_contacts/flutter_contacts.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -15,9 +16,11 @@ const _iosRed = Color(0xFFFF3B30);
 const _iosGreen = Color(0xFF34C759);
 
 class CallScreen extends StatefulWidget {
-  final String initialNumber;
-  
-  const CallScreen({super.key, required this.initialNumber});
+  final String? initialNumber;
+  final int? initialState;
+  final String? initialName;
+  final bool exitOnEnd;
+  const CallScreen({super.key, this.initialNumber, this.initialState, this.initialName, this.exitOnEnd = false});
 
   @override
   State<CallScreen> createState() => _CallScreenState();
@@ -40,19 +43,41 @@ class _CallScreenState extends State<CallScreen> {
   int _seconds = 0;
   bool _isNear = false;
   bool _blockProximity = false;
+  bool _isHoldActionPending = false;
 
   @override
   void initState() {
     super.initState();
-    _number = widget.initialNumber;
-    _resolveContactName();
+    _number = widget.initialNumber ?? 'Unknown';
+    _callState = widget.initialState ?? 0;
+    
+    if (widget.initialName != null && widget.initialName!.isNotEmpty) {
+      _name = widget.initialName;
+    } else {
+      _resolveContactName();
+    }
+    
     _initProximity();
     _subscription = TelecomService.callStateStream.listen((data) {
       if (!mounted) return;
       setState(() {
-        _callState = data['state'] as int;
-        if (data['number'] != 'Unknown') {
+        final newState = data['state'] as int;
+        // If we were disconnected but now a new call is starting, cancel the pop timer!
+        if (_callState == 7 && newState != 7) {
+          _timer?.cancel();
+        }
+        
+        _callState = newState;
+
+        if (data['name'] != null && (data['name'] as String).isNotEmpty) {
+          _name = data['name'] as String;
+        }
+
+        if (data['number'] != 'Unknown' && data['number'] != _number) {
           _number = data['number'] as String;
+          if (_name == null) {
+            _resolveContactName(); // Re-resolve if number actually changed and we don't have a name
+          }
         }
       });
 
@@ -70,9 +95,13 @@ class _CallScreenState extends State<CallScreen> {
         }
         
         _timer?.cancel();
-        _timer = Timer(const Duration(seconds: 2), () {
-          if (mounted && Navigator.canPop(context)) {
-            Navigator.pop(context, _dtmfInput);
+        _timer = Timer(Duration(seconds: widget.exitOnEnd ? 1 : 2), () {
+          if (mounted) {
+            if (widget.exitOnEnd) {
+              SystemNavigator.pop();
+            } else if (Navigator.canPop(context)) {
+              Navigator.pop(context, _dtmfInput);
+            }
           }
         });
       }
@@ -84,13 +113,21 @@ class _CallScreenState extends State<CallScreen> {
       final contacts = await FlutterContacts.getAll(properties: {ContactProperty.phone});
       final cleanQuery = _number.replaceAll(RegExp(r'\D'), '');
       
+      // If the query is just a few digits, don't match (prevents false positives)
+      if (cleanQuery.length < 5) return;
+
       for (var contact in contacts) {
         for (var phone in contact.phones) {
           final cleanPhone = phone.number.replaceAll(RegExp(r'\D'), '');
-          if (cleanPhone.isNotEmpty && cleanQuery.isNotEmpty && 
-             (cleanPhone.contains(cleanQuery) || cleanQuery.contains(cleanPhone))) {
+          
+          // Match if one number ends with the other (handles +91 vs local)
+          if (cleanPhone.isNotEmpty && 
+             (cleanPhone.endsWith(cleanQuery) || cleanQuery.endsWith(cleanPhone))) {
             if (mounted) {
-              setState(() => _name = contact.displayName);
+              setState(() {
+                _name = contact.displayName;
+                debugPrint('CallScreen: Resolved local contact name: $_name');
+              });
             }
             return;
           }
@@ -142,11 +179,21 @@ class _CallScreenState extends State<CallScreen> {
     if (_isRecording) {
       final safeNumber = _number.replaceAll(RegExp(r'[^0-9+]'), '');
       final fileName = 'Call_${safeNumber}_${DateTime.now().millisecondsSinceEpoch}.wav';
-      final dir = Directory('/sdcard/Music/OnyxDialer');
+      final dir = Directory('/storage/emulated/0/Music/OnyxDialer');
       if (!(await dir.exists())) await dir.create(recursive: true);
       TelecomService.startRecording('${dir.path}/$fileName');
     } else {
       TelecomService.stopRecording();
+    }
+  }
+
+  String _getMetadataString() {
+    switch (_callState) {
+      case 2: return 'I N C O M I N G  C A L L';
+      case 1:
+      case 9: return 'O U T G O I N G  C A L L';
+      case 4: return 'A C T I V E  C A L L';
+      default: return 'O N Y X  D I A L E R';
     }
   }
 
@@ -233,46 +280,57 @@ class _CallScreenState extends State<CallScreen> {
       body: SafeArea(
         child: Column(
           children: [
-            const SizedBox(height: 40),
+            const SizedBox(height: 80),
             
             if (!_showKeypad) ...[
-              Container(
-                width: 110, height: 110,
-                decoration: const BoxDecoration(
-                  color: Color(0xFF2C2C2E),
-                  shape: BoxShape.circle,
-                ),
-                alignment: Alignment.center,
+              // Subtle Metadata
+              Center(
                 child: Text(
-                  (_name != null && _name!.trim().isNotEmpty) ? _name!.trim()[0].toUpperCase() : '#',
-                  style: const TextStyle(fontSize: 52, color: Colors.white, fontWeight: FontWeight.w500),
+                  _getMetadataString(),
+                  style: TextStyle(
+                    fontSize: 14, 
+                    color: Colors.white.withOpacity(0.5), 
+                    fontWeight: FontWeight.w600, 
+                    letterSpacing: 4
+                  ),
                 ),
               ),
-              const SizedBox(height: 24),
-            ],
-
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 24),
-              child: Text(
-                _name ?? _number,
-                textAlign: TextAlign.center,
-                style: const TextStyle(fontSize: 34, color: Colors.white, fontWeight: FontWeight.w400),
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
+              const SizedBox(height: 16),
+              
+              // Hero Name
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 32),
+                child: Center(
+                  child: Text(
+                    _name ?? _number,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      fontSize: 48, 
+                      color: Colors.white, 
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: -1
+                    ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
               ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              _getStateString(),
-              style: const TextStyle(fontSize: 18, color: _iosSecondary),
-            ),
-            
-            if (_name != null && _showKeypad == false) ...[
-              const SizedBox(height: 8),
-              Text(
-                _number,
-                style: const TextStyle(fontSize: 16, color: _iosSecondary),
+              
+              const SizedBox(height: 12),
+              
+              // Status / Timer / Number
+              Center(
+                child: Text(
+                  _getStateString(),
+                  style: TextStyle(
+                    fontSize: 20, 
+                    color: _callState == 4 ? _iosGreen : Colors.white.withOpacity(0.5), 
+                    fontWeight: _callState == 4 ? FontWeight.bold : FontWeight.normal
+                  ),
+                ),
               ),
+                
+              const SizedBox(height: 40),
             ],
 
             const Spacer(),
@@ -334,10 +392,10 @@ class _CallScreenState extends State<CallScreen> {
               const SizedBox(height: 40),
               GestureDetector(
                 onTap: () => setState(() => _showKeypad = false),
-                child: const Text('Hide', style: TextStyle(fontSize: 18, color: Colors.white)),
+                child: const Center(child: Text('Hide', style: TextStyle(fontSize: 18, color: Colors.white))),
               ),
               const SizedBox(height: 40),
-            ] else ...[
+            ] else if (_callState != 2 && _callState != 7) ...[
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 45),
                 child: Column(
@@ -382,9 +440,17 @@ class _CallScreenState extends State<CallScreen> {
                         _buildControlButton(
                           icon: Icons.pause_rounded,
                           label: 'hold',
-                          onTap: () {
-                            setState(() => _isHold = !_isHold);
-                            TelecomService.setHold(_isHold);
+                          onTap: () async {
+                            if (_isHoldActionPending) return;
+                            setState(() => _isHoldActionPending = true);
+                            
+                            final newHoldState = !_isHold;
+                            setState(() => _isHold = newHoldState);
+                            await TelecomService.setHold(newHoldState);
+                            
+                            // Allow next action after short delay
+                            await Future.delayed(const Duration(milliseconds: 500));
+                            if (mounted) setState(() => _isHoldActionPending = false);
                           },
                           isActive: _isHold,
                         ),
@@ -403,44 +469,70 @@ class _CallScreenState extends State<CallScreen> {
             ],
 
             Padding(
-              padding: const EdgeInsets.only(bottom: 48, left: 45, right: 45),
+              padding: const EdgeInsets.only(bottom: 80, left: 48, right: 48),
               child: _callState == 2
                   ? Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        GestureDetector(
+                        _buildAction(
+                          icon: Icons.call_end_rounded,
+                          label: 'Decline',
+                          color: _iosRed,
                           onTap: () => TelecomService.endCall(),
-                          child: Container(
-                            width: 76, height: 76,
-                            decoration: const BoxDecoration(color: _iosRed, shape: BoxShape.circle),
-                            child: const Icon(Icons.call_end_rounded, color: Colors.white, size: 36),
-                          ),
                         ),
-                        GestureDetector(
+                        _buildAction(
+                          icon: Icons.call_rounded,
+                          label: 'Answer',
+                          color: _iosGreen,
                           onTap: () => TelecomService.answerCall(),
-                          child: Container(
-                            width: 76, height: 76,
-                            decoration: const BoxDecoration(color: _iosGreen, shape: BoxShape.circle),
-                            child: const Icon(Icons.call_rounded, color: Colors.white, size: 36),
-                          ),
                         ),
                       ],
                     )
                   : Center(
-                      child: GestureDetector(
+                      child: _buildAction(
+                        icon: Icons.call_end_rounded,
+                        label: 'End Call',
+                        color: _iosRed,
                         onTap: () {
                           if (_callState != 7) TelecomService.endCall();
                         },
-                        child: Container(
-                          width: 76, height: 76,
-                          decoration: const BoxDecoration(color: _iosRed, shape: BoxShape.circle),
-                          child: const Icon(Icons.call_end_rounded, color: Colors.white, size: 36),
-                        ),
                       ),
                     ),
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildAction({
+    required IconData icon,
+    required String label,
+    required Color color,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 84, height: 84,
+            decoration: BoxDecoration(
+              color: color,
+              shape: BoxShape.circle,
+              boxShadow: [
+                BoxShadow(color: color.withOpacity(0.3), blurRadius: 20, spreadRadius: 5)
+              ],
+            ),
+            child: Icon(icon, color: Colors.white, size: 40),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            label,
+            style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w500),
+          ),
+        ],
       ),
     );
   }

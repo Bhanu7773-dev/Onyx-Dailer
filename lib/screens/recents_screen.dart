@@ -41,7 +41,12 @@ class _RecentsScreenState extends State<RecentsScreen> with WidgetsBindingObserv
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _fetchCallLogs();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      // Delay initial fetch slightly to keep startup smooth
+      Future.delayed(const Duration(seconds: 1), () {
+        if (mounted) _fetchCallLogs();
+      });
+    });
   }
 
   @override
@@ -58,15 +63,25 @@ class _RecentsScreenState extends State<RecentsScreen> with WidgetsBindingObserv
   }
 
   Future<void> _fetchCallLogs() async {
-    final entries = await CallLog.get();
+    final now = DateTime.now();
+    final thirtyDaysAgo = now.subtract(const Duration(days: 30));
+    
+    // Fetch logs and blocked numbers in parallel for speed
+    final futures = await Future.wait([
+      CallLog.query(dateFrom: thirtyDaysAgo.millisecondsSinceEpoch),
+      FlutterContacts.blockedNumbers.isAvailable(),
+    ]);
+
+    final entries = futures[0] as Iterable<CallLogEntry>;
+    final isBlockedAvailable = futures[1] as bool;
     
     Set<String> blockedNums = {};
-    try {
-      if (await FlutterContacts.blockedNumbers.isAvailable()) {
+    if (isBlockedAvailable) {
+      try {
         final blocked = await FlutterContacts.blockedNumbers.getAll();
         blockedNums = blocked.map((p) => p.number.replaceAll(RegExp(r'\D'), '')).toSet();
-      }
-    } catch (_) {}
+      } catch (_) {}
+    }
 
     if (mounted) {
       setState(() {
@@ -203,11 +218,7 @@ class _RecentsScreenState extends State<RecentsScreen> with WidgetsBindingObserv
   Future<void> _dial(String? number) async {
     if (number == null || number.isEmpty) return;
     HapticFeedback.lightImpact();
-    TelecomService.makeCall(number);
-    await Navigator.push(
-      context,
-      MaterialPageRoute(builder: (_) => CallScreen(initialNumber: number)),
-    );
+    TelecomService.handleOutgoingCall(context, number);
     _fetchCallLogs();
   }
 
@@ -628,11 +639,15 @@ class _RecentsScreenState extends State<RecentsScreen> with WidgetsBindingObserv
                             children: [
                                 Row(
                                   children: [
-                                    Text(name,
-                                        style: TextStyle(
-                                            color: nameColor,
-                                            fontSize: 16,
-                                            fontWeight: FontWeight.w500)),
+                                    Flexible(
+                                      child: Text(name,
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: TextStyle(
+                                              color: nameColor,
+                                              fontSize: 16,
+                                              fontWeight: FontWeight.w500)),
+                                    ),
                                     if (blocked)
                                       const Padding(
                                         padding: EdgeInsets.only(left: 6),
@@ -701,12 +716,27 @@ class _SettingsDialogState extends State<_SettingsDialog> {
   bool? _isRooted;
   bool _autoRecord = false;
   bool _blockProximity = false;
+  String? _defaultSim;
+  List<Map<String, String>> _simCards = [];
 
   @override
   void initState() {
     super.initState();
     _checkRoot();
     _loadPrefs();
+    _loadSimCards();
+  }
+
+  Future<void> _loadSimCards() async {
+    final sims = await TelecomService.getSimCards();
+    if (mounted) {
+      setState(() {
+        _simCards = sims;
+        if (_simCards.length == 1) {
+          _setDefaultSim(_simCards.first['id']!);
+        }
+      });
+    }
   }
 
   Future<void> _checkRoot() async {
@@ -724,6 +754,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
       setState(() {
         _autoRecord = prefs.getBool('auto_record') ?? false;
         _blockProximity = prefs.getBool('block_proximity') ?? false;
+        _defaultSim = prefs.getString('default_sim') ?? 'ask';
       });
     }
   }
@@ -738,6 +769,55 @@ class _SettingsDialogState extends State<_SettingsDialog> {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('block_proximity', value);
     if (mounted) setState(() => _blockProximity = value);
+  }
+
+  Future<void> _setDefaultSim(String value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('default_sim', value);
+    if (mounted) setState(() => _defaultSim = value);
+  }
+
+  void _showSimSelectionSheet() {
+    showCupertinoModalPopup(
+      context: context,
+      builder: (BuildContext context) => CupertinoActionSheet(
+        title: const Text('Default Calling SIM'),
+        message: const Text('Select the SIM card to use for outgoing calls.'),
+        actions: [
+          CupertinoActionSheetAction(
+            onPressed: () {
+              _setDefaultSim('ask');
+              Navigator.pop(context);
+            },
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Text('Ask Every Time'),
+                if (_defaultSim == 'ask') const Icon(CupertinoIcons.check_mark, size: 18),
+              ],
+            ),
+          ),
+          ..._simCards.map((sim) => CupertinoActionSheetAction(
+                onPressed: () {
+                  _setDefaultSim(sim['id']!);
+                  Navigator.pop(context);
+                },
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(sim['label'] ?? 'Unknown SIM'),
+                    if (_defaultSim == sim['id']) const Icon(CupertinoIcons.check_mark, size: 18),
+                  ],
+                ),
+              )),
+        ],
+        cancelButton: CupertinoActionSheetAction(
+          isDestructiveAction: true,
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+      ),
+    );
   }
 
   @override
@@ -786,7 +866,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
           const Text('Recording',
               style: TextStyle(color: _iosSecondary, fontSize: 12, fontWeight: FontWeight.w500)),
           const SizedBox(height: 4),
-          const Text('Saves to: /sdcard/Music/OnyxDialer/',
+          const Text('Saves to: /storage/emulated/0/Music/OnyxDialer/',
               style: TextStyle(color: _iosTertiary, fontSize: 12)),
           const SizedBox(height: 8),
           SwitchListTile(
@@ -810,6 +890,27 @@ class _SettingsDialogState extends State<_SettingsDialog> {
             value: _blockProximity,
             activeThumbColor: _iosBlue,
             onChanged: _toggleBlockProximity,
+          ),
+          const Divider(color: _iosSeparator, height: 20),
+          const Text('Calling Options',
+              style: TextStyle(color: _iosSecondary, fontSize: 12, fontWeight: FontWeight.w500)),
+          const SizedBox(height: 8),
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            title: Text(
+              'Default Calling SIM', 
+              style: TextStyle(color: _simCards.length <= 1 ? Colors.white38 : _iosLabel)
+            ),
+            subtitle: Text(
+              _defaultSim == 'ask'
+                  ? 'Ask Every Time'
+                  : (_simCards.firstWhere((sim) => sim['id'] == _defaultSim, orElse: () => {'label': 'Unknown'})['label'] ?? 'Unknown'),
+              style: TextStyle(color: _simCards.length <= 1 ? Colors.white24 : _iosSecondary, fontSize: 12),
+            ),
+            trailing: _simCards.length <= 1 
+                ? null 
+                : const Icon(CupertinoIcons.chevron_up_chevron_down, color: _iosSecondary, size: 20),
+            onTap: _simCards.length <= 1 ? null : _showSimSelectionSheet,
           ),
         ],
       ),

@@ -58,59 +58,43 @@ public class CallRecorderService extends ICallRecorderService.Stub {
             int audioFormat = AudioFormat.ENCODING_PCM_16BIT;
             int bufferSize = AudioRecord.getMinBufferSize(sampleRate, channelConfig, audioFormat);
 
-            // Fallback sources ladder
-            int[] sources = {
-                MediaRecorder.AudioSource.VOICE_CALL,
-                MediaRecorder.AudioSource.VOICE_UPLINK,
-                MediaRecorder.AudioSource.VOICE_DOWNLINK,
-                MediaRecorder.AudioSource.VOICE_COMMUNICATION,
-                MediaRecorder.AudioSource.MIC
-            };
-
-            for (int source : sources) {
-                try {
-                    mAudioRecord = new AudioRecord(source, sampleRate, channelConfig, audioFormat, bufferSize);
-                    if (mAudioRecord.getState() == AudioRecord.STATE_INITIALIZED) {
-                        Log.d(TAG, "Using audio source: " + source);
-                        break;
-                    }
-                    mAudioRecord.release();
-                } catch (Exception e) {
-                    Log.e(TAG, "Failed to init source " + source + ": " + e.getMessage());
-                }
-            }
-
-            if (mAudioRecord == null || mAudioRecord.getState() != AudioRecord.STATE_INITIALIZED) {
-                Log.e(TAG, "Failed to initialize AudioRecord with any source");
-                mIsRecording = false;
-                return;
-            }
-
             Log.d(TAG, "RecordingThread started for: " + mFilePath);
             try (FileOutputStream os = new FileOutputStream(mFilePath)) {
                 Log.d(TAG, "File opened successfully");
                 writeWavHeader(os, channelConfig, sampleRate, audioFormat);
                 
-                mAudioRecord.startRecording();
-                Log.d(TAG, "AudioRecord started. State: " + mAudioRecord.getRecordingState());
-                
-                byte[] data = new byte[bufferSize];
                 long totalAudioLen = 0;
+                byte[] data = new byte[bufferSize];
 
                 while (mRunning) {
+                    if (mAudioRecord == null || mAudioRecord.getState() != AudioRecord.STATE_INITIALIZED) {
+                        mAudioRecord = initializeAudioRecord(sampleRate, channelConfig, audioFormat, bufferSize);
+                        if (mAudioRecord == null) {
+                            Log.e(TAG, "Failed to initialize AudioRecord. Retrying in 1s...");
+                            try { Thread.sleep(1000); } catch (InterruptedException e) { break; }
+                            continue;
+                        }
+                        mAudioRecord.startRecording();
+                        Log.d(TAG, "AudioRecord started. State: " + mAudioRecord.getRecordingState());
+                    }
+
                     int read = mAudioRecord.read(data, 0, bufferSize);
                     if (read > 0) {
                         os.write(data, 0, read);
                         totalAudioLen += read;
                     } else if (read < 0) {
-                        Log.e(TAG, "AudioRecord read error: " + read);
-                        break;
+                        Log.e(TAG, "AudioRecord read error: " + read + ". Re-initializing...");
+                        mAudioRecord.release();
+                        mAudioRecord = null;
+                        try { Thread.sleep(500); } catch (InterruptedException e) { break; }
                     }
                 }
 
                 Log.d(TAG, "Loop finished. Total bytes: " + totalAudioLen);
-                mAudioRecord.stop();
-                mAudioRecord.release();
+                if (mAudioRecord != null) {
+                    mAudioRecord.stop();
+                    mAudioRecord.release();
+                }
                 
                 // Update WAV header with final length
                 updateWavHeader(mFilePath, totalAudioLen);
@@ -122,6 +106,31 @@ public class CallRecorderService extends ICallRecorderService.Stub {
                 mIsRecording = false;
                 Log.d(TAG, "RecordingThread finished");
             }
+        }
+
+        private AudioRecord initializeAudioRecord(int sampleRate, int channelConfig, int audioFormat, int bufferSize) {
+            int[] sources = {
+                MediaRecorder.AudioSource.VOICE_CALL,
+                MediaRecorder.AudioSource.VOICE_COMMUNICATION,
+                MediaRecorder.AudioSource.VOICE_RECOGNITION,
+                MediaRecorder.AudioSource.MIC,
+                MediaRecorder.AudioSource.VOICE_DOWNLINK,
+                MediaRecorder.AudioSource.VOICE_UPLINK
+            };
+
+            for (int source : sources) {
+                try {
+                    AudioRecord record = new AudioRecord(source, sampleRate, channelConfig, audioFormat, bufferSize);
+                    if (record.getState() == AudioRecord.STATE_INITIALIZED) {
+                        Log.d(TAG, "Successfully initialized audio source: " + source);
+                        return record;
+                    }
+                    record.release();
+                } catch (Exception e) {
+                    Log.e(TAG, "Failed to init source " + source + ": " + e.getMessage());
+                }
+            }
+            return null;
         }
 
         private void writeWavHeader(FileOutputStream out, int channelConfig, int sampleRate, int audioFormat) throws IOException {

@@ -97,8 +97,29 @@ class _RecordingsScreenState extends State<RecordingsScreen> with WidgetsBinding
     if (mounted) setState(() => _isLoading = true);
 
     try {
-      final dir = Directory('/sdcard/Music/OnyxDialer');
-      if (!await dir.exists()) {
+      final possiblePaths = [
+        '/storage/emulated/0/Music/OnyxDialer',
+        '/sdcard/Music/OnyxDialer',
+      ];
+
+      final List<File> files = [];
+      for (final p in possiblePaths) {
+        final dir = Directory(p);
+        if (await dir.exists()) {
+          final found = dir
+              .listSync()
+              .whereType<File>()
+              .where((f) => f.path.endsWith('.wav') || f.path.endsWith('.m4a'));
+          for (final f in found) {
+            final filename = f.path.split('/').last;
+            if (!files.any((existing) => existing.path.split('/').last == filename)) {
+              files.add(f);
+            }
+          }
+        }
+      }
+
+      if (files.isEmpty) {
         if (mounted) setState(() {
           _allRecordings = [];
           _filteredRecordings = [];
@@ -107,10 +128,6 @@ class _RecordingsScreenState extends State<RecordingsScreen> with WidgetsBinding
         return;
       }
 
-      final files = dir.listSync()
-          .whereType<File>()
-          .where((f) => f.path.endsWith('.wav') || f.path.endsWith('.m4a'))
-          .toList();
       files.sort((a, b) => b.lastModifiedSync().compareTo(a.lastModifiedSync()));
 
       final contacts = await FlutterContacts.getAll(properties: {ContactProperty.phone});

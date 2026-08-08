@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:convert';
+import 'package:flutter/material.dart';
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -9,16 +11,65 @@ class TelecomService {
   static const MethodChannel _methodChannel = MethodChannel('dark.onyx.com/telecom_commands');
   static const EventChannel _eventChannel = EventChannel('dark.onyx.com/telecom_events');
 
-  static Stream<Map<String, dynamic>> get callStateStream {
-    return _eventChannel.receiveBroadcastStream().map((event) => Map<String, dynamic>.from(event));
-  }
+  static final Stream<Map<String, dynamic>> callStateStream = 
+      _eventChannel.receiveBroadcastStream().map((event) => Map<String, dynamic>.from(event));
 
   static Future<void> requestDefaultDialer() async {
     await _methodChannel.invokeMethod('requestDefaultDialer');
   }
 
-  static Future<void> makeCall(String number) async {
-    await _methodChannel.invokeMethod('makeCall', {'number': number});
+  static Future<List<Map<String, String>>> getSimCards() async {
+    try {
+      final List<dynamic> result = await _methodChannel.invokeMethod('getSimCards');
+      return result.map((e) => Map<String, String>.from(e as Map)).toList();
+    } catch (e) {
+      debugPrint('TelecomService: Failed to get SIM cards: $e');
+      return [];
+    }
+  }
+
+  static Future<void> makeCall(String number, {String? simId}) async {
+    String? selectedSim = simId;
+    if (selectedSim == null) {
+      final prefs = await SharedPreferences.getInstance();
+      selectedSim = prefs.getString('default_sim');
+    }
+    
+    await _methodChannel.invokeMethod('makeCall', {
+      'number': number,
+      if (selectedSim != null && selectedSim != 'ask') 'simId': selectedSim,
+    });
+  }
+
+  static Future<void> handleOutgoingCall(BuildContext context, String number) async {
+    final prefs = await SharedPreferences.getInstance();
+    final defaultSim = prefs.getString('default_sim') ?? 'ask';
+    final sims = await getSimCards();
+
+    if (defaultSim == 'ask' && sims.length > 1) {
+      if (!context.mounted) return;
+      showCupertinoModalPopup(
+        context: context,
+        builder: (BuildContext context) => CupertinoActionSheet(
+          title: const Text('Select Calling SIM'),
+          message: Text('Choose a SIM card to call $number.'),
+          actions: sims.map((sim) => CupertinoActionSheetAction(
+            onPressed: () {
+              Navigator.pop(context);
+              makeCall(number, simId: sim['id']);
+            },
+            child: Text(sim['label'] ?? 'Unknown SIM'),
+          )).toList(),
+          cancelButton: CupertinoActionSheetAction(
+            isDestructiveAction: true,
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+        ),
+      );
+    } else {
+      makeCall(number);
+    }
   }
 
   static Future<void> answerCall() async {

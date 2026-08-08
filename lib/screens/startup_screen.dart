@@ -25,6 +25,8 @@ class _StartupScreenState extends State<StartupScreen> {
       Permission.contacts,
       Permission.phone,
       Permission.microphone,
+      Permission.systemAlertWindow,
+      Permission.ignoreBatteryOptimizations,
     ].request();
 
     if (status[Permission.contacts] != PermissionStatus.granted ||

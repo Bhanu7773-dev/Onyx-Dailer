@@ -60,9 +60,8 @@ class _ContactDetailsSheetState extends State<ContactDetailsSheet> {
 
   void _dial() {
     HapticFeedback.lightImpact();
-    TelecomService.makeCall(widget.phone);
+    TelecomService.handleOutgoingCall(context, widget.phone);
     Navigator.pop(context); // close sheet
-    Navigator.push(context, MaterialPageRoute(builder: (_) => CallScreen(initialNumber: widget.phone)));
   }
 
   Future<void> _openWhatsApp() async {

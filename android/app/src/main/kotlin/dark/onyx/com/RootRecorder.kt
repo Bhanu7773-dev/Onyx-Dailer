@@ -27,77 +27,134 @@ object RootRecorder {
             )
             isRecording = true
 
-            // Gain factors — uplink (mic) is typically very quiet vs downlink
-            val UPLINK_GAIN   = 4.0f  // Your mic (reduced from 8x)
-            val DOWNLINK_GAIN = 3.0f  // Remote party (boosted from 1.5x)
-
-            println("RootRecorder: Initializing dual-stream capture (mic + downlink)...")
-
-            // MIC = 1 (raw mic, works on Realme/OPPO), VOICE_DOWNLINK = 3 (remote party)
-            val uplinkRecorder = AudioRecord(1, sampleRate, channelConfig, audioFormat, minBufSize)
-            val downlinkRecorder = AudioRecord(3, sampleRate, channelConfig, audioFormat, minBufSize)
-
-            val uplinkOk = uplinkRecorder.state == AudioRecord.STATE_INITIALIZED
-            val downlinkOk = downlinkRecorder.state == AudioRecord.STATE_INITIALIZED
-
-            println("RootRecorder: MIC init: $uplinkOk, Downlink init: $downlinkOk")
-
-            if (!uplinkOk && !downlinkOk) {
-                println("RootRecorder: FATAL ERROR: Neither audio source could be initialized.")
-                System.exit(1)
-            }
-
-            if (uplinkOk) uplinkRecorder.startRecording()
-            if (downlinkOk) downlinkRecorder.startRecording()
-
-            println("RootRecorder: Recording started. Saving to: $path")
-
-            val fos = FileOutputStream(path)
-            // Write placeholder WAV header (44 bytes)
-            writeWavHeader(fos, sampleRate, 1, 16)
-
-            val uplinkBuf = ShortArray(minBufSize / 2)
-            val downlinkBuf = ShortArray(minBufSize / 2)
-            val mixedBuf = ByteArray(minBufSize)
-            var totalBytes = 0
-
             // Stop-signal listener thread
             Thread {
                 try {
                     System.`in`.read()
                     isRecording = false
-                } catch (e: Exception) {
+                } catch (_: Exception) {
                     isRecording = false
                 }
             }.start()
 
-            // Main record loop
-            while (isRecording) {
-                val uplinkRead = if (uplinkOk) uplinkRecorder.read(uplinkBuf, 0, uplinkBuf.size) else 0
-                val downlinkRead = if (downlinkOk) downlinkRecorder.read(downlinkBuf, 0, downlinkBuf.size) else 0
+            // 1. Primary Attempt: Single-stream VOICE_CALL (Source 4) - Hardware combined stream
+            println("RootRecorder: Attempting hardware VOICE_CALL (Source 4)...")
+            var voiceCallRecord: AudioRecord? = null
+            try {
+                val testRec = AudioRecord(4, sampleRate, channelConfig, audioFormat, minBufSize)
+                if (testRec.state == AudioRecord.STATE_INITIALIZED) {
+                    voiceCallRecord = testRec
+                } else {
+                    testRec.release()
+                }
+            } catch (e: Exception) {
+                println("RootRecorder: VOICE_CALL init exception: ${e.message}")
+            }
 
-                val samplesToProcess = maxOf(uplinkRead.coerceAtLeast(0), downlinkRead.coerceAtLeast(0))
-                if (samplesToProcess == 0) continue
+            val fos = FileOutputStream(path)
+            writeWavHeader(fos, sampleRate, 1, 16)
+            var totalBytes = 0
 
-                for (i in 0 until samplesToProcess) {
-                    val up = if (uplinkRead > i) uplinkBuf[i].toInt() else 0
-                    val down = if (downlinkRead > i) downlinkBuf[i].toInt() else 0
-                    // Apply gain to each stream, then sum with clipping
-                    val boostedUp = (up * UPLINK_GAIN).toInt()
-                    val boostedDown = (down * DOWNLINK_GAIN).toInt()
-                    val mixed = (boostedUp + boostedDown).coerceIn(-32768, 32767)
-                    mixedBuf[i * 2] = (mixed and 0xFF).toByte()
-                    mixedBuf[i * 2 + 1] = ((mixed shr 8) and 0xFF).toByte()
+            if (voiceCallRecord != null) {
+                println("RootRecorder: VOICE_CALL initialized successfully. Using combined 2-way hardware capture...")
+                voiceCallRecord.startRecording()
+                val buf = ByteArray(minBufSize)
+
+                while (isRecording) {
+                    val read = voiceCallRecord.read(buf, 0, buf.size)
+                    if (read > 0) {
+                        fos.write(buf, 0, read)
+                        totalBytes += read
+                    } else if (read < 0) {
+                        println("RootRecorder: VOICE_CALL read error: $read")
+                        break
+                    }
+                }
+                voiceCallRecord.stop()
+                voiceCallRecord.release()
+            } else {
+                // 2. Dual-stream fallback (Uplink + Downlink)
+                println("RootRecorder: VOICE_CALL unavailable. Initializing dual-stream fallback...")
+
+                val UPLINK_GAIN = 4.0f
+                val DOWNLINK_GAIN = 3.0f
+
+                val uplinkSources = intArrayOf(2, 1, 7) // VOICE_UPLINK, MIC, VOICE_COMMUNICATION
+                val downlinkSources = intArrayOf(3, 4)  // VOICE_DOWNLINK, VOICE_CALL
+
+                var uplinkRecorder: AudioRecord? = null
+                for (src in uplinkSources) {
+                    try {
+                        val r = AudioRecord(src, sampleRate, channelConfig, audioFormat, minBufSize)
+                        if (r.state == AudioRecord.STATE_INITIALIZED) {
+                            uplinkRecorder = r
+                            println("RootRecorder: Uplink source initialized: $src")
+                            break
+                        }
+                        r.release()
+                    } catch (_: Exception) {}
                 }
 
-                val byteCount = samplesToProcess * 2
-                fos.write(mixedBuf, 0, byteCount)
-                totalBytes += byteCount
+                var downlinkRecorder: AudioRecord? = null
+                for (src in downlinkSources) {
+                    try {
+                        val r = AudioRecord(src, sampleRate, channelConfig, audioFormat, minBufSize)
+                        if (r.state == AudioRecord.STATE_INITIALIZED) {
+                            downlinkRecorder = r
+                            println("RootRecorder: Downlink source initialized: $src")
+                            break
+                        }
+                        r.release()
+                    } catch (_: Exception) {}
+                }
+
+                val uplinkOk = uplinkRecorder != null
+                val downlinkOk = downlinkRecorder != null
+
+                if (!uplinkOk && !downlinkOk) {
+                    println("RootRecorder: FATAL ERROR: No audio source initialized.")
+                    System.exit(1)
+                }
+
+                uplinkRecorder?.startRecording()
+                downlinkRecorder?.startRecording()
+
+                val uplinkBuf = ShortArray(minBufSize / 2)
+                val downlinkBuf = ShortArray(minBufSize / 2)
+                val mixedBuf = ByteArray(minBufSize)
+
+                while (isRecording) {
+                    val uplinkRead = uplinkRecorder?.read(uplinkBuf, 0, uplinkBuf.size) ?: 0
+                    val downlinkRead = downlinkRecorder?.read(downlinkBuf, 0, downlinkBuf.size) ?: 0
+
+                    val validUpRead = if (uplinkRead > 0) uplinkRead else 0
+                    val validDownRead = if (downlinkRead > 0) downlinkRead else 0
+
+                    val samplesToProcess = maxOf(validUpRead, validDownRead)
+                    if (samplesToProcess == 0) continue
+
+                    for (i in 0 until samplesToProcess) {
+                        val up = if (validUpRead > i) uplinkBuf[i].toInt() else 0
+                        val down = if (validDownRead > i) downlinkBuf[i].toInt() else 0
+                        val boostedUp = (up * UPLINK_GAIN).toInt()
+                        val boostedDown = (down * DOWNLINK_GAIN).toInt()
+                        val mixed = (boostedUp + boostedDown).coerceIn(-32768, 32767)
+                        mixedBuf[i * 2] = (mixed and 0xFF).toByte()
+                        mixedBuf[i * 2 + 1] = ((mixed shr 8) and 0xFF).toByte()
+                    }
+
+                    val byteCount = samplesToProcess * 2
+                    fos.write(mixedBuf, 0, byteCount)
+                    totalBytes += byteCount
+                }
+
+                uplinkRecorder?.stop()
+                uplinkRecorder?.release()
+                downlinkRecorder?.stop()
+                downlinkRecorder?.release()
             }
 
             println("RootRecorder: Stop signal received. Finalizing file...")
-            if (uplinkOk) { uplinkRecorder.stop(); uplinkRecorder.release() }
-            if (downlinkOk) { downlinkRecorder.stop(); downlinkRecorder.release() }
             fos.flush()
             fos.close()
 
@@ -108,6 +165,12 @@ object RootRecorder {
             raf.seek(40)
             raf.writeInt(Integer.reverseBytes(totalBytes))      // Subchunk2Size
             raf.close()
+
+            // Fix permissions so user file managers can access it
+            Runtime.getRuntime().exec(arrayOf("chmod", "666", path)).waitFor()
+            try {
+                Runtime.getRuntime().exec(arrayOf("am", "broadcast", "-a", "android.intent.action.MEDIA_SCANNER_SCAN_FILE", "-d", "file://$path"))
+            } catch (_: Exception) {}
 
             println("RootRecorder: Recording saved successfully. Total bytes: $totalBytes")
             System.exit(0)

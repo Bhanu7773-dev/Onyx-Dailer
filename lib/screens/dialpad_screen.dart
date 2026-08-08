@@ -88,14 +88,7 @@ class _DialpadScreenState extends State<DialpadScreen> {
     final target = num ?? _number;
     if (target.isEmpty) return;
     HapticFeedback.heavyImpact();
-    TelecomService.makeCall(target);
-    final result = await Navigator.push(
-      context,
-      MaterialPageRoute(builder: (_) => CallScreen(initialNumber: target)),
-    );
-    if (result is String && result.isNotEmpty && mounted) {
-      setState(() { _number = result; _updateSuggestions(); });
-    }
+    TelecomService.handleOutgoingCall(context, target);
   }
 
   @override
