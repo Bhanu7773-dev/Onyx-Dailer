@@ -280,7 +280,7 @@ class _CallScreenState extends State<CallScreen> {
       body: SafeArea(
         child: Column(
           children: [
-            const SizedBox(height: 80),
+            const SizedBox(height: 36),
             
             if (!_showKeypad) ...[
               // Subtle Metadata

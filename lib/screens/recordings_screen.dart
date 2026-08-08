@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:async';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -54,11 +55,14 @@ class _RecordingsScreenState extends State<RecordingsScreen> with WidgetsBinding
   Duration _position = Duration.zero;
   RecordingItem? _expandedItem; // tracks which card is expanded
 
+  StreamSubscription<FileSystemEvent>? _dirWatcher;
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _loadRecordings();
+    _startDirectoryWatch();
 
     _audioPlayer.onPlayerStateChanged.listen((state) {
       if (mounted) setState(() => _isPlaying = state == PlayerState.playing);
@@ -78,8 +82,20 @@ class _RecordingsScreenState extends State<RecordingsScreen> with WidgetsBinding
     });
   }
 
+  void _startDirectoryWatch() {
+    try {
+      final dir = Directory('/storage/emulated/0/Music/OnyxDialer');
+      if (dir.existsSync()) {
+        _dirWatcher = dir.watch().listen((_) {
+          _loadRecordings();
+        });
+      }
+    } catch (_) {}
+  }
+
   @override
   void dispose() {
+    _dirWatcher?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     _searchCtrl.dispose();
     _audioPlayer.dispose();
@@ -581,7 +597,6 @@ class _RecordingsScreenState extends State<RecordingsScreen> with WidgetsBinding
                             ),
                           ),
                           const Spacer(),
-                          const SizedBox(width: 48),
                         ],
                       ),
                     ],

@@ -3,7 +3,6 @@ package dark.onyx.com;
 import android.media.AudioFormat;
 import android.media.AudioRecord;
 import android.media.MediaRecorder;
-import android.os.Process;
 import android.util.Log;
 import java.io.FileOutputStream;
 import java.io.IOException;
@@ -42,6 +41,16 @@ public class CallRecorderService extends ICallRecorderService.Stub {
         private final String mFilePath;
         private AudioRecord mAudioRecord;
         private volatile boolean mRunning = true;
+        private int mCurrentSourceIndex = 0;
+
+        private final int[] sources = {
+            MediaRecorder.AudioSource.VOICE_CALL,          // 4
+            MediaRecorder.AudioSource.VOICE_COMMUNICATION, // 7
+            MediaRecorder.AudioSource.VOICE_RECOGNITION,   // 6
+            MediaRecorder.AudioSource.MIC,                 // 1
+            MediaRecorder.AudioSource.VOICE_DOWNLINK,      // 3
+            MediaRecorder.AudioSource.VOICE_UPLINK         // 2
+        };
 
         public RecordingThread(String filePath) {
             this.mFilePath = filePath;
@@ -53,10 +62,10 @@ public class CallRecorderService extends ICallRecorderService.Stub {
 
         @Override
         public void run() {
-            int sampleRate = 44100;
+            int sampleRate = 8000; // 8kHz Telephony Standard
             int channelConfig = AudioFormat.CHANNEL_IN_MONO;
             int audioFormat = AudioFormat.ENCODING_PCM_16BIT;
-            int bufferSize = AudioRecord.getMinBufferSize(sampleRate, channelConfig, audioFormat);
+            int bufferSize = Math.max(AudioRecord.getMinBufferSize(sampleRate, channelConfig, audioFormat), 8192);
 
             Log.d(TAG, "RecordingThread started for: " + mFilePath);
             try (FileOutputStream os = new FileOutputStream(mFilePath)) {
@@ -64,6 +73,7 @@ public class CallRecorderService extends ICallRecorderService.Stub {
                 writeWavHeader(os, channelConfig, sampleRate, audioFormat);
                 
                 long totalAudioLen = 0;
+                int sourceRetries = 0;
                 byte[] data = new byte[bufferSize];
 
                 while (mRunning) {
@@ -74,31 +84,60 @@ public class CallRecorderService extends ICallRecorderService.Stub {
                             try { Thread.sleep(1000); } catch (InterruptedException e) { break; }
                             continue;
                         }
-                        mAudioRecord.startRecording();
-                        Log.d(TAG, "AudioRecord started. State: " + mAudioRecord.getRecordingState());
+                        try {
+                            mAudioRecord.startRecording();
+                            Log.d(TAG, "AudioRecord started. Source: " + sources[mCurrentSourceIndex] + ", State: " + mAudioRecord.getRecordingState());
+                        } catch (Exception e) {
+                            Log.e(TAG, "startRecording failed: " + e.getMessage());
+                            mAudioRecord.release();
+                            mAudioRecord = null;
+                            mCurrentSourceIndex = (mCurrentSourceIndex + 1) % sources.length;
+                            continue;
+                        }
                     }
 
                     int read = mAudioRecord.read(data, 0, bufferSize);
                     if (read > 0) {
                         os.write(data, 0, read);
                         totalAudioLen += read;
+                        sourceRetries = 0; // Reset retries on successful read
                     } else if (read < 0) {
-                        Log.e(TAG, "AudioRecord read error: " + read + ". Re-initializing...");
-                        mAudioRecord.release();
-                        mAudioRecord = null;
-                        try { Thread.sleep(500); } catch (InterruptedException e) { break; }
+                        sourceRetries++;
+                        Log.w(TAG, "AudioRecord read error: " + read + " on source " + sources[mCurrentSourceIndex] + " (retry " + sourceRetries + "/5)");
+                        
+                        if (mAudioRecord != null) {
+                            try { mAudioRecord.stop(); } catch (Exception ignored) {}
+                            mAudioRecord.release();
+                            mAudioRecord = null;
+                        }
+
+                        if (sourceRetries >= 5) {
+                            sourceRetries = 0;
+                            mCurrentSourceIndex = (mCurrentSourceIndex + 1) % sources.length;
+                            Log.e(TAG, "Max retries reached. Switching to next source: " + sources[mCurrentSourceIndex]);
+                        }
+                        
+                        try { Thread.sleep(200); } catch (InterruptedException e) { break; }
                     }
                 }
 
                 Log.d(TAG, "Loop finished. Total bytes: " + totalAudioLen);
                 if (mAudioRecord != null) {
-                    mAudioRecord.stop();
+                    try { mAudioRecord.stop(); } catch (Exception ignored) {}
                     mAudioRecord.release();
                 }
                 
                 // Update WAV header with final length
                 updateWavHeader(mFilePath, totalAudioLen);
                 Log.d(TAG, "WAV header updated");
+
+                // Fix file permissions and trigger media scanner
+                try {
+                    Runtime.getRuntime().exec(new String[]{"chmod", "666", mFilePath}).waitFor();
+                    Runtime.getRuntime().exec(new String[]{"am", "broadcast", "-a", "android.intent.action.MEDIA_SCANNER_SCAN_FILE", "-d", "file://" + mFilePath});
+                } catch (Exception e) {
+                    Log.e(TAG, "Permission / MediaScanner error: " + e.getMessage());
+                }
 
             } catch (IOException e) {
                 Log.e(TAG, "IO Error during recording: " + e.getMessage());
@@ -109,19 +148,13 @@ public class CallRecorderService extends ICallRecorderService.Stub {
         }
 
         private AudioRecord initializeAudioRecord(int sampleRate, int channelConfig, int audioFormat, int bufferSize) {
-            int[] sources = {
-                MediaRecorder.AudioSource.VOICE_CALL,
-                MediaRecorder.AudioSource.VOICE_COMMUNICATION,
-                MediaRecorder.AudioSource.VOICE_RECOGNITION,
-                MediaRecorder.AudioSource.MIC,
-                MediaRecorder.AudioSource.VOICE_DOWNLINK,
-                MediaRecorder.AudioSource.VOICE_UPLINK
-            };
-
-            for (int source : sources) {
+            for (int i = 0; i < sources.length; i++) {
+                int index = (mCurrentSourceIndex + i) % sources.length;
+                int source = sources[index];
                 try {
                     AudioRecord record = new AudioRecord(source, sampleRate, channelConfig, audioFormat, bufferSize);
                     if (record.getState() == AudioRecord.STATE_INITIALIZED) {
+                        mCurrentSourceIndex = index;
                         Log.d(TAG, "Successfully initialized audio source: " + source);
                         return record;
                     }
