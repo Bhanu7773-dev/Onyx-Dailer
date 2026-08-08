@@ -129,8 +129,9 @@ class TelecomService {
     if (_rootRecordingProcess != null) return;
     try {
       debugPrint('TelecomService: Starting root recording to $filePath');
-      final classpathCmd = 'pm path dark.onyx.com | cut -d: -f2';
-      final command = 'export CLASSPATH=\$($classpathCmd) && app_process / dark.onyx.com.RootRecorder "$filePath"';
+      // For split APKs (--split-per-abi), pm path returns multiple lines.
+      // We must join ALL APK paths with ':' for CLASSPATH so app_process finds our class.
+      final command = 'export CLASSPATH=\$(pm path dark.onyx.com | sed "s/package://" | tr "\\n" ":") && app_process / dark.onyx.com.RootRecorder "$filePath"';
       
       _rootRecordingProcess = await Process.start('su', ['-c', command]);
       
