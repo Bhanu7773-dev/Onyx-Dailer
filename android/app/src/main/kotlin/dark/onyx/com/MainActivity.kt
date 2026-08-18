@@ -21,6 +21,7 @@ import rikka.shizuku.Shizuku
 import android.content.ServiceConnection
 import android.os.IBinder
 import android.content.ComponentName
+import dark.onyx.com.BuildConfig
 
 class MainActivity: FlutterActivity() {
     companion object {
@@ -37,7 +38,7 @@ class MainActivity: FlutterActivity() {
         Shizuku.UserServiceArgs(ComponentName(packageName, CallRecorderService::class.java.name))
             .daemon(false)
             .processNameSuffix("recorder")
-            .debuggable(true)
+            .debuggable(BuildConfig.DEBUG)
             .version(1)
     }
 
@@ -245,30 +246,144 @@ class MainActivity: FlutterActivity() {
                     result.success(null)
                 }
                 "endCall" -> {
-                    CallService.currentCall?.let {
-                        if (it.state == Call.STATE_RINGING) {
-                            it.reject(false, null)
-                        } else {
-                            it.disconnect()
+                    val service = CallService.instance
+                    val calls = service?.calls ?: emptyList()
+                    if (calls.isNotEmpty()) {
+                        calls.forEach { call ->
+                            try {
+                                if (call.state == Call.STATE_RINGING) {
+                                    call.reject(false, null)
+                                } else if (call.state != Call.STATE_DISCONNECTED && call.state != Call.STATE_DISCONNECTING) {
+                                    call.disconnect()
+                                }
+                            } catch (e: Exception) {
+                                android.util.Log.e("OnyxMainActivity", "Error ending call: ${e.message}")
+                            }
+                        }
+                    } else {
+                        CallService.currentCall?.let {
+                            if (it.state == Call.STATE_RINGING) {
+                                it.reject(false, null)
+                            } else {
+                                it.disconnect()
+                            }
                         }
                     }
                     result.success(null)
+                }
+                "mergeCall" -> {
+                    try {
+                        val service = CallService.instance
+                        val calls = service?.calls ?: emptyList()
+                        val activeCalls = calls.filter { 
+                            it.state != Call.STATE_DISCONNECTED && it.state != Call.STATE_DISCONNECTING 
+                        }
+                        if (activeCalls.size >= 2) {
+                            val activeCall = activeCalls.firstOrNull { it.state == Call.STATE_ACTIVE } ?: activeCalls.firstOrNull()
+                            val otherCall = activeCalls.firstOrNull { it != activeCall }
+                            if (activeCall != null && otherCall != null) {
+                                activeCall.conference(otherCall)
+                            }
+                        }
+                        // Unhold any held calls after merge so the user and all participants can hear and talk
+                        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                            val updatedCalls = service?.calls ?: emptyList()
+                            updatedCalls.forEach { c ->
+                                if (c.state == Call.STATE_HOLDING) {
+                                    try { c.unhold() } catch (e: Exception) {}
+                                }
+                            }
+                            service?.setMuted(false)
+                        }, 500)
+                        result.success(true)
+                    } catch (e: Exception) {
+                        android.util.Log.e("OnyxMainActivity", "mergeCall failed: ${e.message}")
+                        result.success(false)
+                    }
+                }
+                "swapCall" -> {
+                    try {
+                        val service = CallService.instance
+                        val calls = service?.calls ?: emptyList()
+                        val heldCall = calls.firstOrNull { it.state == Call.STATE_HOLDING }
+                        val activeCall = calls.firstOrNull { it.state == Call.STATE_ACTIVE }
+                        if (heldCall != null && activeCall != null) {
+                            activeCall.hold()
+                            heldCall.unhold()
+                        } else if (heldCall != null) {
+                            heldCall.unhold()
+                        }
+                        result.success(true)
+                    } catch (e: Exception) {
+                        android.util.Log.e("OnyxMainActivity", "swapCall failed: ${e.message}")
+                        result.success(false)
+                    }
+                }
+                "getCallInfo" -> {
+                    val service = CallService.instance
+                    val calls = service?.calls ?: emptyList()
+                    val activeCalls = calls.filter { 
+                        it.state != Call.STATE_DISCONNECTED && it.state != Call.STATE_DISCONNECTING 
+                    }
+                    val hasConference = activeCalls.any { 
+                        it.details?.hasProperty(Call.Details.PROPERTY_CONFERENCE) == true || it.children.isNotEmpty()
+                    }
+                    val unmergedCount = if (hasConference) 1 else activeCalls.count { it.parent == null }
+                    val isHolding = activeCalls.any { it.state == Call.STATE_HOLDING }
+
+                    result.success(mapOf(
+                        "count" to unmergedCount,
+                        "isConference" to hasConference,
+                        "isHolding" to isHolding
+                    ))
+                }
+                "getCallCount" -> {
+                    val service = CallService.instance
+                    val count = service?.calls?.count { 
+                        it.state != Call.STATE_DISCONNECTED && it.state != Call.STATE_DISCONNECTING 
+                    } ?: 0
+                    result.success(count)
+                }
+                "prepareShizukuService" -> {
+                    try {
+                        if (callRecorderService == null) {
+                            android.util.Log.d("OnyxMainActivity", "Prewarm: Initiating Shizuku service bind")
+                            Shizuku.bindUserService(serviceArgs, serviceConnection)
+                        }
+                        result.success(true)
+                    } catch (e: Exception) {
+                        android.util.Log.e("OnyxMainActivity", "prepareShizukuService failed: ${e.message}")
+                        result.success(false)
+                    }
                 }
                 "startShizukuRecording" -> {
                     val filePath = call.argument<String>("filePath")
                     if (filePath != null) {
-                        if (callRecorderService == null) {
-                            pendingRecordingPath = filePath
-                            Shizuku.bindUserService(serviceArgs, serviceConnection)
-                        } else {
-                            callRecorderService?.startRecording(filePath)
+                        try {
+                            if (callRecorderService == null) {
+                                pendingRecordingPath = filePath
+                                android.util.Log.w("OnyxMainActivity", "Service not ready; binding and queueing: $filePath")
+                                Shizuku.bindUserService(serviceArgs, serviceConnection)
+                            } else {
+                                callRecorderService?.startRecording(filePath)
+                            }
+                            result.success(true)
+                        } catch (e: Exception) {
+                            android.util.Log.e("OnyxMainActivity", "startShizukuRecording failed: ${e.message}")
+                            result.success(false)
                         }
+                    } else {
+                        result.success(false)
                     }
-                    result.success(null)
                 }
                 "stopShizukuRecording" -> {
-                    callRecorderService?.stopRecording()
-                    result.success(null)
+                    try {
+                        callRecorderService?.stopRecording()
+                        result.success(true)
+                    } catch (e: Exception) {
+                        android.util.Log.e("OnyxMainActivity", "stopShizukuRecording failed: ${e.message}")
+                        result.success(false)
+                    }
                 }
                 "isIncomingCallLaunch" -> {
                     val isIncoming = intent.getBooleanExtra("incoming_call", false)

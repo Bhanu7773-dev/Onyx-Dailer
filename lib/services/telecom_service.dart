@@ -100,6 +100,45 @@ class TelecomService {
     await _methodChannel.invokeMethod('setHold', {'enabled': enabled});
   }
 
+  static Future<bool> mergeCall() async {
+    try {
+      return await _methodChannel.invokeMethod<bool>('mergeCall') ?? false;
+    } catch (e) {
+      debugPrint('TelecomService: mergeCall failed: $e');
+      return false;
+    }
+  }
+
+  static Future<bool> swapCall() async {
+    try {
+      return await _methodChannel.invokeMethod<bool>('swapCall') ?? false;
+    } catch (e) {
+      debugPrint('TelecomService: swapCall failed: $e');
+      return false;
+    }
+  }
+
+  static Future<Map<String, dynamic>> getCallInfo() async {
+    try {
+      final res = await _methodChannel.invokeMethod('getCallInfo');
+      if (res != null) {
+        return Map<String, dynamic>.from(res as Map);
+      }
+    } catch (e) {
+      debugPrint('TelecomService: getCallInfo failed: $e');
+    }
+    return {'count': 1, 'isConference': false, 'isHolding': false};
+  }
+
+  static Future<int> getCallCount() async {
+    try {
+      return await _methodChannel.invokeMethod<int>('getCallCount') ?? 0;
+    } catch (e) {
+      debugPrint('TelecomService: getCallCount failed: $e');
+      return 0;
+    }
+  }
+
   // === Recording Engine Selection ===
   
   static Process? _rootRecordingProcess;
@@ -163,20 +202,43 @@ class TelecomService {
     if (_isShizukuRecording) return;
     try {
       debugPrint('TelecomService: Starting Shizuku recording to $filePath');
-      await _methodChannel.invokeMethod('startShizukuRecording', {'filePath': filePath});
-      _isShizukuRecording = true;
+      final started = await _methodChannel.invokeMethod<bool>('startShizukuRecording', {'filePath': filePath}) ?? false;
+      _isShizukuRecording = started;
+      
+      if (!started) {
+        debugPrint('TelecomService: Service not ready immediately; retrying in 200ms...');
+        await Future.delayed(const Duration(milliseconds: 200));
+        if (!_isShizukuRecording) {
+          final retryStarted = await _methodChannel.invokeMethod<bool>('startShizukuRecording', {'filePath': filePath}) ?? false;
+          _isShizukuRecording = retryStarted;
+          if (!retryStarted) {
+            debugPrint('TelecomService: Retry also failed after 200ms');
+          }
+        }
+      }
     } catch (e) {
       debugPrint('TelecomService: Failed to start Shizuku recording: $e');
+      _isShizukuRecording = false;
+    }
+  }
+
+  static Future<void> prepareShizukuService() async {
+    try {
+      debugPrint('TelecomService: Prewarm Shizuku service');
+      await _methodChannel.invokeMethod<bool>('prepareShizukuService');
+    } catch (e) {
+      debugPrint('TelecomService: Error prewarm Shizuku: $e');
     }
   }
 
   static Future<void> _stopShizukuRecording() async {
     try {
       debugPrint('TelecomService: Stopping Shizuku recording...');
-      await _methodChannel.invokeMethod('stopShizukuRecording');
-      _isShizukuRecording = false;
+      await _methodChannel.invokeMethod<bool>('stopShizukuRecording');
     } catch (e) {
       debugPrint('TelecomService: Failed to stop Shizuku recording: $e');
+    } finally {
+      _isShizukuRecording = false;
     }
   }
 }

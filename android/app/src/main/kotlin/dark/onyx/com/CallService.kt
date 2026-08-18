@@ -4,6 +4,15 @@ import android.telecom.Call
 import android.telecom.InCallService
 import android.util.Log
 import android.content.Intent
+import android.content.Context
+import android.media.AudioAttributes
+import android.media.AudioManager
+import android.media.MediaPlayer
+import android.media.RingtoneManager
+import android.os.Build
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.os.VibratorManager
 
 class CallService : InCallService() {
 
@@ -17,14 +26,27 @@ class CallService : InCallService() {
         var isCallUiOpen = false
     }
 
+    private var mediaPlayer: MediaPlayer? = null
+    private var vibrator: Vibrator? = null
+    private var isRinging = false
+
     override fun onCreate() {
         super.onCreate()
         instance = this
         createNotificationChannel()
+
+        vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val vm = getSystemService(VibratorManager::class.java)
+            vm?.defaultVibrator
+        } else {
+            @Suppress("DEPRECATION")
+            getSystemService(VIBRATOR_SERVICE) as? Vibrator
+        }
     }
 
     override fun onDestroy() {
         super.onDestroy()
+        stopRinging()
         isCallUiOpen = false
     }
 
@@ -32,8 +54,93 @@ class CallService : InCallService() {
         override fun onStateChanged(call: Call, state: Int) {
             super.onStateChanged(call, state)
             Log.d(TAG, "Call State Changed: $state")
+
+            // Stop ringing when call is answered, disconnected, or no longer ringing
+            if (state != Call.STATE_RINGING) {
+                stopRinging()
+            }
+
+            if (state == Call.STATE_DISCONNECTED) {
+                val hasOtherActiveCalls = calls.any {
+                    it != call && it.state != Call.STATE_DISCONNECTED && it.state != Call.STATE_DISCONNECTING
+                }
+                if (hasOtherActiveCalls) {
+                    Log.d(TAG, "Ignoring transient disconnected callback; another call is still active")
+                    return
+                }
+            }
+
             listener?.invoke(call, state)
         }
+    }
+
+    private fun startRinging() {
+        if (isRinging) return
+        isRinging = true
+
+        val audioManager = getSystemService(AUDIO_SERVICE) as AudioManager
+        Log.d(TAG, "Ringer mode: ${audioManager.ringerMode}, Ring volume: ${audioManager.getStreamVolume(AudioManager.STREAM_RING)}")
+
+        // Play ringtone using MediaPlayer (more reliable than Ringtone API)
+        if (audioManager.ringerMode == AudioManager.RINGER_MODE_NORMAL) {
+            try {
+                val ringtoneUri = RingtoneManager.getActualDefaultRingtoneUri(this, RingtoneManager.TYPE_RINGTONE)
+                Log.d(TAG, "Ringtone URI: $ringtoneUri")
+                
+                if (ringtoneUri != null) {
+                    mediaPlayer = MediaPlayer().apply {
+                        setDataSource(this@CallService, ringtoneUri)
+                        setAudioAttributes(
+                            AudioAttributes.Builder()
+                                .setUsage(AudioAttributes.USAGE_NOTIFICATION_RINGTONE)
+                                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                                .setLegacyStreamType(AudioManager.STREAM_RING)
+                                .build()
+                        )
+                        isLooping = true
+                        prepare()
+                        start()
+                    }
+                    Log.d(TAG, "MediaPlayer ringtone started successfully")
+                } else {
+                    Log.w(TAG, "No default ringtone URI found")
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to start ringtone: ${e.message}", e)
+                mediaPlayer?.release()
+                mediaPlayer = null
+            }
+        }
+
+        // Vibrate in normal and vibrate modes (not silent)
+        if (audioManager.ringerMode != AudioManager.RINGER_MODE_SILENT) {
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    val pattern = longArrayOf(0, 800, 600, 800, 600)
+                    vibrator?.vibrate(VibrationEffect.createWaveform(pattern, 0))
+                } else {
+                    @Suppress("DEPRECATION")
+                    vibrator?.vibrate(longArrayOf(0, 800, 600, 800, 600), 0)
+                }
+                Log.d(TAG, "Vibration started")
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to start vibration: ${e.message}")
+            }
+        }
+    }
+
+    private fun stopRinging() {
+        if (!isRinging) return
+        try {
+            mediaPlayer?.stop()
+            mediaPlayer?.release()
+            mediaPlayer = null
+            vibrator?.cancel()
+            Log.d(TAG, "Ringtone and vibration stopped")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to stop ringing: ${e.message}")
+        }
+        isRinging = false
     }
 
     private fun createNotificationChannel() {
@@ -59,6 +166,7 @@ class CallService : InCallService() {
         call.registerCallback(callCallback)
         
         if (call.state == Call.STATE_RINGING) {
+            startRinging()
             showIncomingCallNotification()
         }
         
@@ -110,6 +218,8 @@ class CallService : InCallService() {
     override fun onCallRemoved(call: Call) {
         super.onCallRemoved(call)
         Log.d(TAG, "Call Removed")
+        stopRinging()
+
         val manager = getSystemService(android.app.NotificationManager::class.java)
         manager.cancel(1001)
         
@@ -117,7 +227,14 @@ class CallService : InCallService() {
         if (currentCall == call) {
             currentCall = null
         }
-        listener?.invoke(call, Call.STATE_DISCONNECTED)
+
+        val nextCall = calls.firstOrNull { it.state != Call.STATE_DISCONNECTED && it.state != Call.STATE_DISCONNECTING }
+        if (nextCall != null) {
+            currentCall = nextCall
+            listener?.invoke(nextCall, nextCall.state)
+        } else {
+            listener?.invoke(call, Call.STATE_DISCONNECTED)
+        }
         
         // Reset flag if no active calls remain
         if (currentCall == null) {

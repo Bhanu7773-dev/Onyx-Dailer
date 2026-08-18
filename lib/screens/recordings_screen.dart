@@ -57,6 +57,40 @@ class _RecordingsScreenState extends State<RecordingsScreen> with WidgetsBinding
 
   StreamSubscription<FileSystemEvent>? _dirWatcher;
 
+  String _normalizeDigits(String value) => value.replaceAll(RegExp(r'\D'), '');
+
+  Contact? _matchBestContact(List<Contact> contacts, String number) {
+    final cleanNum = _normalizeDigits(number);
+    if (cleanNum.length < 7) return null;
+
+    Contact? bestContact;
+    var bestScore = -1;
+
+    for (final contact in contacts) {
+      for (final phone in contact.phones) {
+        final cleanPhone = _normalizeDigits(phone.number);
+        if (cleanPhone.length < 7) continue;
+
+        final minLen = cleanPhone.length < cleanNum.length ? cleanPhone.length : cleanNum.length;
+        var suffixMatch = 0;
+        for (var i = 1; i <= minLen; i++) {
+          if (cleanPhone[cleanPhone.length - i] == cleanNum[cleanNum.length - i]) {
+            suffixMatch++;
+          } else {
+            break;
+          }
+        }
+
+        if (suffixMatch > bestScore) {
+          bestScore = suffixMatch;
+          bestContact = contact;
+        }
+      }
+    }
+
+    return bestScore >= 7 ? bestContact : null;
+  }
+
   @override
   void initState() {
     super.initState();
@@ -152,31 +186,24 @@ class _RecordingsScreenState extends State<RecordingsScreen> with WidgetsBinding
       for (final file in files) {
         final filename = file.path.split('/').last;
         final ext = filename.endsWith('.wav') ? '.wav' : '.m4a';
-        final parts = filename.replaceAll(ext, '').split('_');
+        final stem = filename.substring(0, filename.length - ext.length);
+        final separatorIndex = stem.lastIndexOf('_');
 
         String number = 'Unknown';
         DateTime timestamp = file.lastModifiedSync();
 
-        if (parts.length >= 3) {
-          number = parts[1];
-          final timeMillis = int.tryParse(parts[2]);
+        if (separatorIndex > 0) {
+          final rawNumber = stem.substring(0, separatorIndex);
+          final rawTimestamp = stem.substring(separatorIndex + 1);
+
+          number = rawNumber.startsWith('Call_') ? rawNumber.substring(5) : rawNumber;
+          final timeMillis = int.tryParse(rawTimestamp);
           if (timeMillis != null) {
             timestamp = DateTime.fromMillisecondsSinceEpoch(timeMillis);
           }
-        } else if (parts.length == 2) {
-          number = parts[1];
         }
 
-        Contact? matchedContact;
-        for (final contact in contacts) {
-          final hasMatch = contact.phones.any((p) {
-            final cleanPhone = p.number.replaceAll(RegExp(r'\D'), '');
-            final cleanNum = number.replaceAll(RegExp(r'\D'), '');
-            return cleanPhone.isNotEmpty && cleanNum.isNotEmpty &&
-                (cleanPhone.contains(cleanNum) || cleanNum.contains(cleanPhone));
-          });
-          if (hasMatch) { matchedContact = contact; break; }
-        }
+        final matchedContact = _matchBestContact(contacts, number);
 
         items.add(RecordingItem(
           file: file,

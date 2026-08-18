@@ -47,7 +47,16 @@ class _HomeScreenState extends State<HomeScreen> {
     // Move heavy work after the first frame
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _requestPermissions();
+      _prewarmShizuku();
     });
+  }
+
+  Future<void> _prewarmShizuku() async {
+    final prefs = await SharedPreferences.getInstance();
+    final mode = prefs.getString('start_mode') ?? 'none';
+    if (mode == 'shizuku') {
+      await TelecomService.prepareShizukuService();
+    }
   }
 
   int _currentIndex = 1;
