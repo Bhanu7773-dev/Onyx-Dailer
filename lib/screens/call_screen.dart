@@ -38,6 +38,7 @@ class _CallScreenState extends State<CallScreen> {
   bool _isRecording = false;
   String _dtmfInput = '';
   int _callCount = 1;
+  bool _isSpam = false;
   
   StreamSubscription? _subscription;
   StreamSubscription<int>? _proximitySub;
@@ -59,6 +60,7 @@ class _CallScreenState extends State<CallScreen> {
       _resolveContactName();
     }
     
+    _checkSpam();
     _initProximity();
     _subscription = TelecomService.callStateStream.listen((data) {
       if (!mounted) return;
@@ -95,6 +97,7 @@ class _CallScreenState extends State<CallScreen> {
 
         if (incomingNumber != 'Unknown' && incomingNumber != _number) {
           _number = incomingNumber;
+          _checkSpam();
           if (_name == null) {
             _resolveContactName(); // Re-resolve if number actually changed and we don't have a name
           }
@@ -154,6 +157,121 @@ class _CallScreenState extends State<CallScreen> {
         }
       }
     }
+  }
+
+  Future<void> _checkSpam() async {
+    final prefs = await SharedPreferences.getInstance();
+    final spamProtection = prefs.getBool('spam_protection') ?? false;
+    if (spamProtection) {
+      final cleanNum = _number.replaceAll(RegExp(r'\D'), '');
+      
+      // Developer test number
+      if (cleanNum == '9999999999') {
+        if (mounted) setState(() => _isSpam = true);
+        return;
+      }
+
+      // 1. India: 140 / 91140 commercial telemarketers
+      if (cleanNum.startsWith('140') || cleanNum.startsWith('91140')) {
+        if (mounted) setState(() => _isSpam = true);
+        return;
+      }
+
+      // 2. North America (US/CA): Toll-free spam & premium rate (e.g. 1-800, 1-888, 1-900)
+      final usNumber = cleanNum.startsWith('1') ? cleanNum.substring(1) : cleanNum;
+      if (usNumber.length >= 3) {
+        final prefix3 = usNumber.substring(0, 3);
+        if (const {'800', '888', '877', '866', '855', '844', '833', '900'}.contains(prefix3)) {
+          if (mounted) setState(() => _isSpam = true);
+          return;
+        }
+      }
+
+      // 3. United Kingdom (UK): Premium rates (09xx) & Personal Call Redirect scams (070)
+      final ukNumber = cleanNum.startsWith('44') ? '0${cleanNum.substring(2)}' : cleanNum;
+      if (ukNumber.startsWith('070') || ukNumber.startsWith('090') || ukNumber.startsWith('091') || ukNumber.startsWith('098')) {
+        if (mounted) setState(() => _isSpam = true);
+        return;
+      }
+
+      // 4. Australia: Premium services (190x)
+      final auNumber = cleanNum.startsWith('61') ? cleanNum.substring(2) : cleanNum;
+      if (auNumber.startsWith('190') || auNumber.startsWith('0190')) {
+        if (mounted) setState(() => _isSpam = true);
+        return;
+      }
+
+      // 5. Germany: Premium rate services (0900)
+      final deNumber = cleanNum.startsWith('49') ? '0${cleanNum.substring(2)}' : cleanNum;
+      if (deNumber.startsWith('0900')) {
+        if (mounted) setState(() => _isSpam = true);
+        return;
+      }
+
+      // 6. France: Shared cost / high premium rate (089)
+      final frNumber = cleanNum.startsWith('33') ? '0${cleanNum.substring(2)}' : cleanNum;
+      if (frNumber.startsWith('089')) {
+        if (mounted) setState(() => _isSpam = true);
+        return;
+      }
+
+      // 7. Egypt (EG): Premium services (0900) & spam/telemarketing shortcodes (9xxx / 9xxxx)
+      final egNumber = cleanNum.startsWith('20') ? cleanNum.substring(2) : cleanNum;
+      if (egNumber.startsWith('0900') || (egNumber.length >= 4 && egNumber.length <= 5 && egNumber.startsWith('9'))) {
+        if (mounted) setState(() => _isSpam = true);
+        return;
+      }
+
+      // 8. Saudi Arabia (SA): Commercial telemarketing / premium range (700)
+      final saNumber = cleanNum.startsWith('966') ? cleanNum.substring(3) : cleanNum;
+      if (saNumber.startsWith('700')) {
+        if (mounted) setState(() => _isSpam = true);
+        return;
+      }
+
+      // 9. United Arab Emirates (AE): Telemarketing / shared cost ranges (600)
+      final uaeNumber = cleanNum.startsWith('971') ? cleanNum.substring(3) : cleanNum;
+      if (uaeNumber.startsWith('600')) {
+        if (mounted) setState(() => _isSpam = true);
+        return;
+      }
+
+      // 10. Russia (RU): Premium infotainment/scam ranges (803, 809) & toll-free telemarketing (800)
+      final ruNumber = cleanNum.startsWith('7') ? cleanNum.substring(1) : cleanNum;
+      if (ruNumber.startsWith('800') || ruNumber.startsWith('803') || ruNumber.startsWith('809')) {
+        if (mounted) setState(() => _isSpam = true);
+        return;
+      }
+
+      // 11. Bangladesh (BD): IP telephony commercial marketing ranges (096)
+      final bdNumber = cleanNum.startsWith('880') ? '0${cleanNum.substring(3)}' : cleanNum;
+      if (bdNumber.startsWith('096')) {
+        if (mounted) setState(() => _isSpam = true);
+        return;
+      }
+
+      // 12. Pakistan (PK): Premium rate IVR services (0900)
+      final pkNumber = cleanNum.startsWith('92') ? '0${cleanNum.substring(2)}' : cleanNum;
+      if (pkNumber.startsWith('0900')) {
+        if (mounted) setState(() => _isSpam = true);
+        return;
+      }
+
+      // 13. China (CN): Commercial hotline & telemarketing voice series (95 / 400)
+      final cnNumber = cleanNum.startsWith('86') ? cleanNum.substring(2) : cleanNum;
+      if (cnNumber.startsWith('95') || cnNumber.startsWith('400')) {
+        if (mounted) setState(() => _isSpam = true);
+        return;
+      }
+
+      // 14. Universal Global Rule: Global toll-free / telemarketing numbers (800 / 0800 / 1800)
+      if (cleanNum.startsWith('800') || cleanNum.startsWith('0800') || cleanNum.startsWith('1800') ||
+          cleanNum.startsWith('91800') || cleanNum.startsWith('910800')) {
+        if (mounted) setState(() => _isSpam = true);
+        return;
+      }
+    }
+    if (mounted) setState(() => _isSpam = false);
   }
 
   Future<void> _initProximity() async {
@@ -354,7 +472,35 @@ class _CallScreenState extends State<CallScreen> {
                   ),
                 ),
               ),
-              
+              if (_isSpam) ...[
+                const SizedBox(height: 12),
+                Center(
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: _iosRed.withOpacity(0.15),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(color: _iosRed, width: 1.5),
+                    ),
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.warning_amber_rounded, color: _iosRed, size: 18),
+                        SizedBox(width: 6),
+                        Text(
+                          'SPAM SUSPECTED',
+                          style: TextStyle(
+                            color: _iosRed,
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                            letterSpacing: 1.2,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
               const SizedBox(height: 8),
               
               // Status / Timer / Number
