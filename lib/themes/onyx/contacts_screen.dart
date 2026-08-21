@@ -3,11 +3,11 @@ import 'package:flutter/services.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter_contacts/flutter_contacts.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'package:wavedialer/screens/call_screen.dart';
 import 'package:wavedialer/services/telecom_service.dart';
 import 'package:wavedialer/widgets/contact_details_sheet.dart';
 import 'package:wavedialer/widgets/contact_dialogs.dart';
 import 'dart:ui';
+import 'package:wavedialer/logic/contacts_controller.dart';
 
 
 const _bg           = Color(0xFF000000);
@@ -30,23 +30,18 @@ class ContactsScreen extends StatefulWidget {
 }
 
 class _ContactsScreenState extends State<ContactsScreen> {
-  List<Contact>? _contacts;
-  String _searchQuery = '';
-  Set<String> _blockedNumbers = {};
+  final ContactsController _controller = ContactsController();
 
   final TextEditingController _searchCtrl = TextEditingController();
   final ScrollController _scrollCtrl = ScrollController();
   final FocusNode _searchFocus = FocusNode();
 
-  List<dynamic> _flat = [];
-  Map<String, int> _letterIndex = {};
-  List<String> _letters = [];
-
   @override
   void initState() {
     super.initState();
+    _controller.addListener(_onControllerChange);
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _fetchContacts();
+      _controller.fetchContacts();
     });
   }
 
@@ -55,108 +50,20 @@ class _ContactsScreenState extends State<ContactsScreen> {
     _searchCtrl.dispose();
     _scrollCtrl.dispose();
     _searchFocus.dispose();
+    _controller.removeListener(_onControllerChange);
+    _controller.dispose();
     super.dispose();
   }
 
-  
-  Future<void> _fetchContacts() async {
-    if (await Permission.contacts.isGranted) {
-      // Parallelize fetching contacts and blocked numbers
-      final results = await Future.wait([
-        FlutterContacts.getAll(properties: {ContactProperty.phone}),
-        FlutterContacts.blockedNumbers.isAvailable(),
-      ]);
-
-      final contacts = results[0] as List<Contact>;
-      final isBlockedAvailable = results[1] as bool;
-
-      // Only keep contacts that actually have a phone number
-      final validContacts = contacts.where((c) => c.phones.isNotEmpty).toList();
-
-      validContacts.sort((a, b) =>
-          (a.displayName ?? '').toLowerCase()
-              .compareTo((b.displayName ?? '').toLowerCase()));
-
-      Set<String> blockedNums = {};
-      if (isBlockedAvailable) {
-        try {
-          final blocked = await FlutterContacts.blockedNumbers.getAll();
-          blockedNums = blocked.map((p) => p.number.replaceAll(RegExp(r'\D'), '')).toSet();
-        } catch (_) {}
-      }
-
-      if (mounted) {
-        setState(() {
-          _contacts = validContacts;
-          _blockedNumbers = blockedNums;
-          _rebuild(_searchQuery);
-        });
-      }
-    } else {
-      if (mounted) setState(() { _contacts = []; _flat = []; });
-    }
-  }
-
-  bool _isContactBlocked(Contact contact) {
-    return contact.phones.any((p) {
-      final clean = p.number.replaceAll(RegExp(r'\D'), '');
-      return _blockedNumbers.contains(clean);
-    });
-  }
-
-  String _letterOf(Contact c) {
-    final ch = (c.displayName?.trim() ?? '')[0].toUpperCase();
-    return RegExp(r'[A-Z]').hasMatch(ch) ? ch : '#';
-  }
-
-  void _rebuild(String query) {
-    if (_contacts == null) return;
-
-    List<Contact> filtered = _contacts!;
-    if (query.isNotEmpty) {
-      final q = query.toLowerCase();
-      final pq = query.replaceAll(RegExp(r'\D'), '');
-      filtered = _contacts!.where((c) {
-        final nm = (c.displayName ?? '').toLowerCase().contains(q);
-        final ph = pq.isNotEmpty &&
-            c.phones.any((p) =>
-                p.number.replaceAll(RegExp(r'\D'), '').contains(pq));
-        return nm || ph;
-      }).toList();
-    }
-
-    // Group
-    final Map<String, List<Contact>> grouped = {};
-    for (final c in filtered) {
-      grouped.putIfAbsent(_letterOf(c), () => []).add(c);
-    }
-
-    final letters = grouped.keys.toList()
-      ..sort((a, b) {
-        if (a == '#') return 1;
-        if (b == '#') return -1;
-        return a.compareTo(b);
-      });
-
-    final flat = <dynamic>[];
-    final letterIdx = <String, int>{};
-    for (final l in letters) {
-      letterIdx[l] = flat.length;
-      flat.add(l);
-      flat.addAll(grouped[l]!);
-    }
-
-    _flat = flat;
-    _letterIndex = letterIdx;
-    _letters = letters;
+  void _onControllerChange() {
+    if (mounted) setState(() {});
   }
 
   // ── Actions ───────────────────────────────────────────────────────────────
 
   void _dial(String number) {
     _searchFocus.unfocus();
-    HapticFeedback.lightImpact();
-    TelecomService.handleOutgoingCall(context, number);
+    _controller.dial(context, number);
   }
 
   void _handleCall(Contact contact) {
@@ -234,7 +141,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
       try {
         if (contact.id != null) {
           await FlutterContacts.delete(contact.id!);
-          _fetchContacts();
+          await _controller.fetchContacts();
         }
       } catch (e) {
         debugPrint('Failed to delete contact: $e');
@@ -243,11 +150,11 @@ class _ContactsScreenState extends State<ContactsScreen> {
   }
 
   void _showNewContactDialog() {
-    ContactDialogs.showNewContact(context, onDone: _fetchContacts);
+    ContactDialogs.showNewContact(context, onDone: _controller.fetchContacts);
   }
 
   void _showEditContactDialog(Contact contact) {
-    ContactDialogs.showEditContact(context, contact, onDone: _fetchContacts);
+    ContactDialogs.showEditContact(context, contact, onDone: _controller.fetchContacts);
   }
 
   Future<void> _blockContact(Contact contact) async {
@@ -282,7 +189,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
       return;
     }
 
-    final isBlocked = _isContactBlocked(contact);
+    final isBlocked = _controller.isContactBlocked(contact);
     final confirmed = await showCupertinoDialog<bool>(
       context: context,
       builder: (ctx) => BackdropFilter(
@@ -315,7 +222,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
         } else {
           await FlutterContacts.blockedNumbers.blockAll(numbers);
         }
-        _fetchContacts(); // Refresh blocked status
+        await _controller.fetchContacts(); // Refresh blocked status
       } catch (e) {
         debugPrint('Failed to update blocked status: $e');
       }
@@ -384,10 +291,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
                           focusNode: _searchFocus,
                           onTapOutside: (_) => _searchFocus.unfocus(),
                           onChanged: (v) {
-                            setState(() {
-                              _searchQuery = v;
-                              _rebuild(v);
-                            });
+                            _controller.rebuild(v);
                           },
                           style:
                               const TextStyle(color: _iosLabel, fontSize: 15),
@@ -403,14 +307,11 @@ class _ContactsScreenState extends State<ContactsScreen> {
                           cursorColor: _iosBlue,
                         ),
                       ),
-                      if (_searchQuery.isNotEmpty)
+                      if (_controller.searchQuery.isNotEmpty)
                         GestureDetector(
                           onTap: () {
                             _searchCtrl.clear();
-                            setState(() {
-                              _searchQuery = '';
-                              _rebuild('');
-                            });
+                            _controller.rebuild('');
                             FocusScope.of(context).unfocus();
                           },
                           child: const Padding(
@@ -426,10 +327,10 @@ class _ContactsScreenState extends State<ContactsScreen> {
 
               // ── List ───────────────────────────────────────────────────
               Expanded(
-                child: _contacts == null
+                child: _controller.contacts == null
                     ? const Center(
                         child: CircularProgressIndicator(color: _iosBlue))
-                    : _flat.isEmpty
+                    : _controller.flat.isEmpty
                         ? Center(
                             child: Column(
                               mainAxisSize: MainAxisSize.min,
@@ -438,7 +339,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
                                     size: 60, color: _iosTertiary),
                                 const SizedBox(height: 12),
                                 Text(
-                                  _searchQuery.isEmpty
+                                  _controller.searchQuery.isEmpty
                                       ? 'No contacts'
                                       : 'No results',
                                   style: const TextStyle(
@@ -451,19 +352,19 @@ class _ContactsScreenState extends State<ContactsScreen> {
                             controller: _scrollCtrl,
                             padding: const EdgeInsets.only(
                                 left: 16, right: 16, bottom: 100),
-                            itemCount: _flat.length,
+                            itemCount: _controller.flat.length,
                             itemBuilder: (ctx, i) {
-                              final item = _flat[i];
+                              final item = _controller.flat[i];
                               if (item is String) {
-                                return _sectionHeader(item);
+                                  return _sectionHeader(item);
                               }
                               final contact = item as Contact;
                               // Is this the last in its section?
-                              final isLast = i == _flat.length - 1 ||
-                                  _flat[i + 1] is String;
+                              final isLast = i == _controller.flat.length - 1 ||
+                                  _controller.flat[i + 1] is String;
                               // Is first in section?
                               final isFirst = i == 0 ||
-                                  _flat[i - 1] is String;
+                                  _controller.flat[i - 1] is String;
                               return _contactRow(
                                   contact, isFirst, isLast);
                             },
@@ -529,8 +430,8 @@ class _ContactsScreenState extends State<ContactsScreen> {
             Navigator.pop(context);
             _blockContact(contact);
           },
-          trailingIcon: _isContactBlocked(contact) ? CupertinoIcons.checkmark_circle : CupertinoIcons.slash_circle,
-          child: Text(_isContactBlocked(contact) ? 'Unblock' : 'Block'),
+          trailingIcon: _controller.isContactBlocked(contact) ? CupertinoIcons.checkmark_circle : CupertinoIcons.slash_circle,
+          child: Text(_controller.isContactBlocked(contact) ? 'Unblock' : 'Block'),
         ),
         CupertinoContextMenuAction(
           onPressed: () {
@@ -562,11 +463,16 @@ class _ContactsScreenState extends State<ContactsScreen> {
                     child: CircleAvatar(
                       radius: 18,
                       backgroundColor: _iosTertiary,
-                      child: Text(initial,
-                          style: const TextStyle(
-                              fontSize: 15,
-                              color: _iosLabel,
-                              fontWeight: FontWeight.w500)),
+                      backgroundImage: contact.photo?.thumbnail != null
+                          ? MemoryImage(contact.photo!.thumbnail!)
+                          : null,
+                      child: contact.photo?.thumbnail == null
+                          ? Text(initial,
+                              style: const TextStyle(
+                                  fontSize: 15,
+                                  color: _iosLabel,
+                                  fontWeight: FontWeight.w500))
+                          : null,
                     ),
                   ),
                   const SizedBox(width: 12),
@@ -594,7 +500,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
                                           fontSize: 16,
                                           fontWeight: FontWeight.w400)),
                                 ),
-                                if (_isContactBlocked(contact))
+                                if (_controller.isContactBlocked(contact))
                                   const Padding(
                                     padding: EdgeInsets.only(left: 6),
                                     child: Icon(CupertinoIcons.slash_circle_fill, color: _iosRed, size: 14),

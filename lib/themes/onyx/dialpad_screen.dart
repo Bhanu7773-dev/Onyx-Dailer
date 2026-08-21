@@ -1,9 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_contacts/flutter_contacts.dart';
-import 'package:permission_handler/permission_handler.dart';
-import 'package:wavedialer/services/telecom_service.dart';
-import 'package:wavedialer/screens/call_screen.dart';
+import 'package:wavedialer/logic/dialpad_controller.dart';
 
 // iOS colors
 const _bg         = Color(0xFF000000);
@@ -22,73 +20,24 @@ class DialpadScreen extends StatefulWidget {
 }
 
 class _DialpadScreenState extends State<DialpadScreen> {
-  String _number = '';
-  List<Contact> _allContacts = [];
-  List<Contact> _suggestedContacts = [];
+  final DialpadController _controller = DialpadController();
 
   @override
   void initState() {
     super.initState();
-    _fetchContacts();
+    _controller.init();
+    _controller.addListener(_onControllerChange);
   }
 
-  Future<void> _fetchContacts() async {
-    if (await Permission.contacts.isGranted) {
-      final contacts = await FlutterContacts.getAll(
-          properties: {ContactProperty.phone});
-      if (mounted) setState(() => _allContacts = contacts);
-    }
+  @override
+  void dispose() {
+    _controller.removeListener(_onControllerChange);
+    _controller.dispose();
+    super.dispose();
   }
 
-  String _nameToT9(String name) {
-    const map = {
-      'A':'2','B':'2','C':'2','D':'3','E':'3','F':'3',
-      'G':'4','H':'4','I':'4','J':'5','K':'5','L':'5',
-      'M':'6','N':'6','O':'6','P':'7','Q':'7','R':'7','S':'7',
-      'T':'8','U':'8','V':'8','W':'9','X':'9','Y':'9','Z':'9',
-    };
-    return name.toUpperCase().split('').map((c) => map[c] ?? '').join();
-  }
-
-  void _updateSuggestions() {
-    if (_number.isEmpty) { _suggestedContacts = []; return; }
-    _suggestedContacts = _allContacts.where((c) {
-      final t9 = _nameToT9(c.displayName ?? '');
-      final phoneMatch = c.phones.any((p) =>
-          p.number.replaceAll(RegExp(r'\D'), '').contains(_number));
-      return t9.contains(_number) || phoneMatch;
-    }).toList();
-  }
-
-  void _press(String digit) {
-    HapticFeedback.lightImpact();
-    TelecomService.playLocalDtmf(digit);
-    setState(() {
-      _number += digit;
-      _updateSuggestions();
-    });
-  }
-
-  void _delete() {
-    if (_number.isNotEmpty) {
-      HapticFeedback.lightImpact();
-      setState(() {
-        _number = _number.substring(0, _number.length - 1);
-        _updateSuggestions();
-      });
-    }
-  }
-
-  void _clearAll() {
-    HapticFeedback.mediumImpact();
-    setState(() { _number = ''; _suggestedContacts = []; });
-  }
-
-  Future<void> _call([String? num]) async {
-    final target = num ?? _number;
-    if (target.isEmpty) return;
-    HapticFeedback.heavyImpact();
-    TelecomService.handleOutgoingCall(context, target);
+  void _onControllerChange() {
+    if (mounted) setState(() {});
   }
 
   @override
@@ -130,8 +79,8 @@ class _DialpadScreenState extends State<DialpadScreen> {
                     stops: [0.0, 0.6, 1.0],
                   ).createShader(bounds),
                   blendMode: BlendMode.dstIn,
-                  child: _suggestedContacts.isEmpty
-                      ? _number.isNotEmpty
+                  child: _controller.suggestedContacts.isEmpty
+                      ? _controller.number.isNotEmpty
                           ? _contactActions()
                           : const SizedBox()
                       : _suggestionList(),
@@ -146,7 +95,7 @@ class _DialpadScreenState extends State<DialpadScreen> {
                   children: [
                     Expanded(
                       child: Text(
-                        _number,
+                        _controller.number,
                         textAlign: TextAlign.center,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
@@ -158,10 +107,10 @@ class _DialpadScreenState extends State<DialpadScreen> {
                         ),
                       ),
                     ),
-                    if (_number.isNotEmpty)
+                    if (_controller.number.isNotEmpty)
                       GestureDetector(
-                        onTap: _delete,
-                        onLongPress: _clearAll,
+                        onTap: _controller.delete,
+                        onLongPress: _controller.clearAll,
                         child: const Padding(
                           padding: EdgeInsets.only(left: 8),
                           child: Icon(Icons.backspace_outlined,
@@ -212,7 +161,7 @@ class _DialpadScreenState extends State<DialpadScreen> {
                   alignment: Alignment.center,
                   children: [
                     // Green call button (centred)
-                    _CallButton(onTap: _call),
+                    _CallButton(onTap: () => _controller.call(context)),
                   ],
                 ),
               ),
@@ -230,7 +179,7 @@ class _DialpadScreenState extends State<DialpadScreen> {
       padding: const EdgeInsets.symmetric(vertical: 6),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: keys.map((k) => _DialKey(digit: k.$1, letters: k.$2, onTap: _press)).toList(),
+        children: keys.map((k) => _DialKey(digit: k.$1, letters: k.$2, onTap: (d) => _controller.press(d, context))).toList(),
       ),
     );
   }
@@ -238,15 +187,15 @@ class _DialpadScreenState extends State<DialpadScreen> {
   Widget _suggestionList() {
     return ListView.builder(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-      itemCount: _suggestedContacts.length,
+      itemCount: _controller.suggestedContacts.length,
       itemBuilder: (ctx, i) {
-        final c = _suggestedContacts[i];
+        final c = _controller.suggestedContacts[i];
         final phone = c.phones.isNotEmpty ? c.phones.first.number : '';
-        final initial = (c.displayName?.isNotEmpty == true)
+        final initial = (c.displayName != null && c.displayName!.isNotEmpty)
             ? c.displayName![0].toUpperCase()
             : '#';
         return GestureDetector(
-          onTap: () => _call(phone),
+          onTap: () => _controller.call(context, phone),
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
             margin: const EdgeInsets.only(bottom: 8),
@@ -291,9 +240,9 @@ class _DialpadScreenState extends State<DialpadScreen> {
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       children: [
         _actionTile(Icons.person_add_outlined, 'Create new contact', () async {
-          final c = Contact(phones: [Phone(number: _number)]);
+          final c = Contact(phones: [Phone(number: _controller.number)]);
           await FlutterContacts.native.showCreator(contact: c);
-          _fetchContacts();
+          _controller.fetchContacts();
         }),
         const SizedBox(height: 8),
         _actionTile(Icons.group_add_outlined, 'Add to existing contact', () async {
@@ -301,9 +250,9 @@ class _DialpadScreenState extends State<DialpadScreen> {
           if (id != null) {
             final c = await FlutterContacts.get(id, properties: {ContactProperty.phone});
             if (c != null && mounted) {
-              c.phones.add(Phone(number: _number));
+              c.phones.add(Phone(number: _controller.number));
               await FlutterContacts.update(c);
-              _fetchContacts();
+              _controller.fetchContacts();
             }
           }
         }),

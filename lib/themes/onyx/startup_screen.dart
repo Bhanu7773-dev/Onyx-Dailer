@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:wavedialer/screens/home_screen.dart';
+import 'package:wavedialer/themes/onyx/home_screen.dart';
 import 'dart:io';
 import 'package:shizuku_api/shizuku_api.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -25,6 +25,7 @@ class _StartupScreenState extends State<StartupScreen> {
       Permission.contacts,
       Permission.phone,
       Permission.microphone,
+      Permission.notification,
       Permission.systemAlertWindow,
       Permission.ignoreBatteryOptimizations,
     ].request();

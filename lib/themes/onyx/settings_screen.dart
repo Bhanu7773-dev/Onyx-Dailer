@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:wavedialer/services/telecom_service.dart';
+import 'package:wavedialer/logic/theme_controller.dart';
 
 const _iosBlue = Color(0xFF007AFF);
 const _iosRed = Color(0xFFFF3B30);
@@ -26,6 +27,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _blockProximity = false;
   bool _spamProtection = false;
   String _defaultSim = 'ask';
+  String _appTheme = 'onyx';
   List<Map<String, String>> _simCards = [];
 
   @override
@@ -65,6 +67,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _blockProximity = prefs.getBool('block_proximity') ?? false;
         _spamProtection = prefs.getBool('spam_protection') ?? false;
         _defaultSim = prefs.getString('default_sim') ?? 'ask';
+        _appTheme = prefs.getString('selected_layout_theme') ?? 'onyx';
       });
     }
   }
@@ -91,6 +94,54 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('default_sim', value);
     if (mounted) setState(() => _defaultSim = value);
+  }
+
+  Future<void> _setAppTheme(String value) async {
+    await ThemeController.instance.setTheme(value);
+    if (mounted) setState(() => _appTheme = value);
+  }
+
+  void _showThemeSelectionSheet() {
+    showCupertinoModalPopup(
+      context: context,
+      builder: (BuildContext context) => CupertinoActionSheet(
+        title: const Text('Select Theme'),
+        message: const Text('Choose a visual layout theme for the application.'),
+        actions: [
+          CupertinoActionSheetAction(
+            onPressed: () {
+              _setAppTheme('onyx');
+              Navigator.pop(context);
+            },
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Text('Onyx (Default)'),
+                if (_appTheme == 'onyx') const Icon(CupertinoIcons.check_mark, size: 18),
+              ],
+            ),
+          ),
+          CupertinoActionSheetAction(
+            onPressed: () {
+              _setAppTheme('nothing');
+              Navigator.pop(context);
+            },
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Text('Nothing UI'),
+                if (_appTheme == 'nothing') const Icon(CupertinoIcons.check_mark, size: 18),
+              ],
+            ),
+          ),
+        ],
+        cancelButton: CupertinoActionSheetAction(
+          isDestructiveAction: true,
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+      ),
+    );
   }
 
   void _showSimSelectionSheet() {
@@ -206,7 +257,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             const Divider(color: _iosSeparator, height: 1, indent: 16),
             _buildListTile(
               title: 'Storage Directory',
-              subtitle: '/storage/emulated/0/Music/OnyxDialer/',
+              subtitle: '/storage/emulated/0/Recordings/OnyxDialer/',
             ),
           ]),
 
@@ -240,6 +291,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ? null
                   : const Icon(CupertinoIcons.chevron_up_chevron_down, color: _iosSecondary, size: 16),
               onTap: _simCards.length <= 1 ? null : _showSimSelectionSheet,
+            ),
+          ]),
+
+          // Section 5: Appearance & Themes
+          _buildSectionHeader('APPEARANCE & THEMES'),
+          _buildSettingCard([
+            _buildListTile(
+              title: 'App Theme',
+              subtitle: _appTheme == 'onyx'
+                  ? 'Onyx (Default)'
+                  : _appTheme == 'nothing'
+                      ? 'Nothing UI'
+                      : _appTheme.toUpperCase(),
+              trailing: const Icon(CupertinoIcons.chevron_up_chevron_down, color: _iosSecondary, size: 16),
+              onTap: _showThemeSelectionSheet,
             ),
           ]),
           const SizedBox(height: 40),

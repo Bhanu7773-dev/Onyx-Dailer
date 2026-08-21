@@ -6,8 +6,9 @@ import 'package:flutter_contacts/flutter_contacts.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:wavedialer/services/telecom_service.dart';
-import 'package:wavedialer/screens/dialpad_screen.dart';
+import 'package:wavedialer/themes/onyx/dialpad_screen.dart';
 import 'package:proximity_sensor/proximity_sensor.dart';
+import 'package:wavedialer/logic/call_controller.dart';
 
 const _bg = Color(0xFF000000);
 const _iosSecondary = Color(0xFF8E8E93);
@@ -20,349 +21,65 @@ class CallScreen extends StatefulWidget {
   final String? initialNumber;
   final int? initialState;
   final String? initialName;
+  final int initialSeconds;
   final bool exitOnEnd;
-  const CallScreen({super.key, this.initialNumber, this.initialState, this.initialName, this.exitOnEnd = false});
+  const CallScreen({
+    super.key,
+    this.initialNumber,
+    this.initialState,
+    this.initialName,
+    this.initialSeconds = 0,
+    this.exitOnEnd = false,
+  });
 
   @override
   State<CallScreen> createState() => _CallScreenState();
 }
 
 class _CallScreenState extends State<CallScreen> {
-  int _callState = 0;
-  String _number = '';
-  String? _name;
-  bool _showKeypad = false;
-  bool _isSpeakerOn = false;
-  bool _isMuted = false;
-  bool _isHold = false;
-  bool _isRecording = false;
-  String _dtmfInput = '';
-  int _callCount = 1;
-  bool _isSpam = false;
-  
-  StreamSubscription? _subscription;
-  StreamSubscription<int>? _proximitySub;
-  Timer? _timer;
-  int _seconds = 0;
-  bool _isNear = false;
-  bool _blockProximity = false;
-  bool _isHoldActionPending = false;
+  final CallController _controller = CallController();
+  Timer? _exitTimer;
 
   @override
   void initState() {
     super.initState();
-    _number = widget.initialNumber ?? 'Unknown';
-    _callState = widget.initialState ?? 0;
-    
-    if (widget.initialName != null && widget.initialName!.isNotEmpty) {
-      _name = widget.initialName;
-    } else {
-      _resolveContactName();
-    }
-    
-    _checkSpam();
-    _initProximity();
-    _subscription = TelecomService.callStateStream.listen((data) {
-      if (!mounted) return;
-
-      // Update call count on every event
-      _updateCallCount();
-
-      final incomingNumber = (data['number'] as String?) ?? 'Unknown';
-      final newState = data['state'] as int;
-
-      // When a call disconnects and we have another call on hold, auto-unhold it
-      if (newState == 7 && incomingNumber != _number) {
-        debugPrint('CallScreen: Other call disconnected, auto-unholding...');
-        Future.delayed(const Duration(milliseconds: 500), () {
-          if (mounted && _isHold) {
-            TelecomService.setHold(false);
-            setState(() => _isHold = false);
-          }
-        });
-        return;
-      }
-
-      setState(() {
-        // If we were disconnected but now a new call is starting, cancel the pop timer!
-        if (_callState == 7 && newState != 7) {
-          _timer?.cancel();
-        }
-        
-        _callState = newState;
-
-        if (data['name'] != null && (data['name'] as String).isNotEmpty) {
-          _name = data['name'] as String;
-        }
-
-        if (incomingNumber != 'Unknown' && incomingNumber != _number) {
-          _number = incomingNumber;
-          _checkSpam();
-          if (_name == null) {
-            _resolveContactName(); // Re-resolve if number actually changed and we don't have a name
-          }
-        }
-      });
-
-      if (_callState == 4 && _timer == null) {
-        _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
-          if (mounted) setState(() => _seconds++);
-        });
-        _maybeAutoRecord();
-      }
-
-      if (_callState == 7) {
-        if (_isRecording) {
-          TelecomService.stopRecording();
-          if (mounted) setState(() => _isRecording = false);
-        }
-        
-        _timer?.cancel();
-        _timer = Timer(Duration(seconds: widget.exitOnEnd ? 1 : 2), () {
-          if (mounted) {
-            if (widget.exitOnEnd) {
-              SystemNavigator.pop();
-            } else if (Navigator.canPop(context)) {
-              Navigator.pop(context, _dtmfInput);
-            }
-          }
-        });
-      }
-    });
-  }
-
-  Future<void> _resolveContactName() async {
-    if (await Permission.contacts.isGranted) {
-      final contacts = await FlutterContacts.getAll(properties: {ContactProperty.phone});
-      final cleanQuery = _number.replaceAll(RegExp(r'\D'), '');
-      
-      // If the query is just a few digits, don't match (prevents false positives)
-      if (cleanQuery.length < 5) return;
-
-      for (var contact in contacts) {
-        for (var phone in contact.phones) {
-          final cleanPhone = phone.number.replaceAll(RegExp(r'\D'), '');
-          
-          // Match if one number ends with the other (handles +91 vs local)
-          if (cleanPhone.isNotEmpty && 
-             (cleanPhone.endsWith(cleanQuery) || cleanQuery.endsWith(cleanPhone))) {
-            if (mounted) {
-              setState(() {
-                _name = contact.displayName;
-                debugPrint('CallScreen: Resolved local contact name: $_name');
-              });
-            }
-            return;
-          }
-        }
-      }
-    }
-  }
-
-  Future<void> _checkSpam() async {
-    final prefs = await SharedPreferences.getInstance();
-    final spamProtection = prefs.getBool('spam_protection') ?? false;
-    if (spamProtection) {
-      final cleanNum = _number.replaceAll(RegExp(r'\D'), '');
-      
-      // Developer test number
-      if (cleanNum == '9999999999') {
-        if (mounted) setState(() => _isSpam = true);
-        return;
-      }
-
-      // 1. India: 140 / 91140 commercial telemarketers
-      if (cleanNum.startsWith('140') || cleanNum.startsWith('91140')) {
-        if (mounted) setState(() => _isSpam = true);
-        return;
-      }
-
-      // 2. North America (US/CA): Toll-free spam & premium rate (e.g. 1-800, 1-888, 1-900)
-      final usNumber = cleanNum.startsWith('1') ? cleanNum.substring(1) : cleanNum;
-      if (usNumber.length >= 3) {
-        final prefix3 = usNumber.substring(0, 3);
-        if (const {'800', '888', '877', '866', '855', '844', '833', '900'}.contains(prefix3)) {
-          if (mounted) setState(() => _isSpam = true);
-          return;
-        }
-      }
-
-      // 3. United Kingdom (UK): Premium rates (09xx) & Personal Call Redirect scams (070)
-      final ukNumber = cleanNum.startsWith('44') ? '0${cleanNum.substring(2)}' : cleanNum;
-      if (ukNumber.startsWith('070') || ukNumber.startsWith('090') || ukNumber.startsWith('091') || ukNumber.startsWith('098')) {
-        if (mounted) setState(() => _isSpam = true);
-        return;
-      }
-
-      // 4. Australia: Premium services (190x)
-      final auNumber = cleanNum.startsWith('61') ? cleanNum.substring(2) : cleanNum;
-      if (auNumber.startsWith('190') || auNumber.startsWith('0190')) {
-        if (mounted) setState(() => _isSpam = true);
-        return;
-      }
-
-      // 5. Germany: Premium rate services (0900)
-      final deNumber = cleanNum.startsWith('49') ? '0${cleanNum.substring(2)}' : cleanNum;
-      if (deNumber.startsWith('0900')) {
-        if (mounted) setState(() => _isSpam = true);
-        return;
-      }
-
-      // 6. France: Shared cost / high premium rate (089)
-      final frNumber = cleanNum.startsWith('33') ? '0${cleanNum.substring(2)}' : cleanNum;
-      if (frNumber.startsWith('089')) {
-        if (mounted) setState(() => _isSpam = true);
-        return;
-      }
-
-      // 7. Egypt (EG): Premium services (0900) & spam/telemarketing shortcodes (9xxx / 9xxxx)
-      final egNumber = cleanNum.startsWith('20') ? cleanNum.substring(2) : cleanNum;
-      if (egNumber.startsWith('0900') || (egNumber.length >= 4 && egNumber.length <= 5 && egNumber.startsWith('9'))) {
-        if (mounted) setState(() => _isSpam = true);
-        return;
-      }
-
-      // 8. Saudi Arabia (SA): Commercial telemarketing / premium range (700)
-      final saNumber = cleanNum.startsWith('966') ? cleanNum.substring(3) : cleanNum;
-      if (saNumber.startsWith('700')) {
-        if (mounted) setState(() => _isSpam = true);
-        return;
-      }
-
-      // 9. United Arab Emirates (AE): Telemarketing / shared cost ranges (600)
-      final uaeNumber = cleanNum.startsWith('971') ? cleanNum.substring(3) : cleanNum;
-      if (uaeNumber.startsWith('600')) {
-        if (mounted) setState(() => _isSpam = true);
-        return;
-      }
-
-      // 10. Russia (RU): Premium infotainment/scam ranges (803, 809) & toll-free telemarketing (800)
-      final ruNumber = cleanNum.startsWith('7') ? cleanNum.substring(1) : cleanNum;
-      if (ruNumber.startsWith('800') || ruNumber.startsWith('803') || ruNumber.startsWith('809')) {
-        if (mounted) setState(() => _isSpam = true);
-        return;
-      }
-
-      // 11. Bangladesh (BD): IP telephony commercial marketing ranges (096)
-      final bdNumber = cleanNum.startsWith('880') ? '0${cleanNum.substring(3)}' : cleanNum;
-      if (bdNumber.startsWith('096')) {
-        if (mounted) setState(() => _isSpam = true);
-        return;
-      }
-
-      // 12. Pakistan (PK): Premium rate IVR services (0900)
-      final pkNumber = cleanNum.startsWith('92') ? '0${cleanNum.substring(2)}' : cleanNum;
-      if (pkNumber.startsWith('0900')) {
-        if (mounted) setState(() => _isSpam = true);
-        return;
-      }
-
-      // 13. China (CN): Commercial hotline & telemarketing voice series (95 / 400)
-      final cnNumber = cleanNum.startsWith('86') ? cleanNum.substring(2) : cleanNum;
-      if (cnNumber.startsWith('95') || cnNumber.startsWith('400')) {
-        if (mounted) setState(() => _isSpam = true);
-        return;
-      }
-
-      // 14. Universal Global Rule: Global toll-free / telemarketing numbers (800 / 0800 / 1800)
-      if (cleanNum.startsWith('800') || cleanNum.startsWith('0800') || cleanNum.startsWith('1800') ||
-          cleanNum.startsWith('91800') || cleanNum.startsWith('910800')) {
-        if (mounted) setState(() => _isSpam = true);
-        return;
-      }
-    }
-    if (mounted) setState(() => _isSpam = false);
-  }
-
-  Future<void> _initProximity() async {
-    final prefs = await SharedPreferences.getInstance();
-    _blockProximity = prefs.getBool('block_proximity') ?? false;
-    
-    if (!_blockProximity) {
-      ProximitySensor.setProximityScreenOff(true);
-      _proximitySub = ProximitySensor.events.listen((event) {
-        if (mounted) setState(() => _isNear = (event > 0));
-      });
-    }
+    _controller.init(
+      initialNumber: widget.initialNumber ?? 'Unknown',
+      initialState: widget.initialState ?? 0,
+      initialName: widget.initialName,
+      initialSeconds: widget.initialSeconds,
+    );
+    _controller.addListener(_onControllerChange);
   }
 
   @override
   void dispose() {
-    _subscription?.cancel();
-    _proximitySub?.cancel();
-    _timer?.cancel();
+    _controller.removeListener(_onControllerChange);
+    _controller.dispose();
+    _exitTimer?.cancel();
     ProximitySensor.setProximityScreenOff(false);
     super.dispose();
   }
 
-  Future<void> _updateCallCount() async {
-    final info = await TelecomService.getCallInfo();
+  void _onControllerChange() {
     if (!mounted) return;
-    final count = (info['count'] as int?) ?? 1;
-    final isConf = (info['isConference'] as bool?) ?? false;
-    final isHolding = (info['isHolding'] as bool?) ?? false;
+    setState(() {});
 
-    setState(() {
-      _callCount = count;
-      if (isConf) {
-        _name = 'Conference Call';
-        _isHold = false;
-      } else if (!isHolding && _isHold) {
-        _isHold = false;
+    // Manage exit transition when call ends
+    if (_controller.callState == 7) {
+      ProximitySensor.setProximityScreenOff(false);
+      if (_exitTimer == null) {
+        _exitTimer = Timer(Duration(seconds: widget.exitOnEnd ? 1 : 2), () {
+          if (mounted) {
+            ProximitySensor.setProximityScreenOff(false);
+            if (widget.exitOnEnd) {
+              SystemNavigator.pop();
+            } else if (Navigator.canPop(context)) {
+              Navigator.pop(context, _controller.dtmfInput);
+            }
+          }
+        });
       }
-    });
-  }
-
-  void _onDigitPressed(String digit) {
-    setState(() => _dtmfInput += digit);
-    TelecomService.playLocalDtmf(digit);
-  }
-
-  String _formatDuration(int seconds) {
-    final m = seconds ~/ 60;
-    final s = seconds % 60;
-    return '${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
-  }
-
-  Future<void> _maybeAutoRecord() async {
-    final prefs = await SharedPreferences.getInstance();
-    final autoRecord = prefs.getBool('auto_record') ?? false;
-    if (autoRecord && !_isRecording) _toggleRecording();
-  }
-
-  Future<void> _toggleRecording() async {
-    setState(() => _isRecording = !_isRecording);
-    if (_isRecording) {
-      final safeNumber = _number.replaceAll(RegExp(r'[^0-9+]'), '');
-      final fileName = 'Call_${safeNumber}_${DateTime.now().millisecondsSinceEpoch}.wav';
-      final dir = Directory('/storage/emulated/0/Music/OnyxDialer');
-      if (!(await dir.exists())) await dir.create(recursive: true);
-      TelecomService.startRecording('${dir.path}/$fileName');
-    } else {
-      TelecomService.stopRecording();
-    }
-  }
-
-  String _getMetadataString() {
-    switch (_callState) {
-      case 2: return 'I N C O M I N G  C A L L';
-      case 1:
-      case 9: return 'O U T G O I N G  C A L L';
-      case 4: return 'A C T I V E  C A L L';
-      default: return 'O N Y X  D I A L E R';
-    }
-  }
-
-  String _getStateString() {
-    if (_isHold || _callState == 3) return 'On Hold';
-    switch (_callState) {
-      case 1:
-      case 9: return 'calling...';
-      case 2: return 'Incoming Call';
-      case 4: return _formatDuration(_seconds);
-      case 7: return 'Call Ended';
-      case 10: return 'Disconnecting...';
-      default: return 'connecting...';
     }
   }
 
@@ -403,7 +120,7 @@ class _CallScreenState extends State<CallScreen> {
 
   Widget _buildDialButton(String digit, String letters) {
     return GestureDetector(
-      onTap: () => _onDigitPressed(digit),
+      onTap: () => _controller.onDigitPressed(digit),
       child: Container(
         width: 76,
         height: 76,
@@ -431,19 +148,41 @@ class _CallScreenState extends State<CallScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: _bg,
-      resizeToAvoidBottomInset: false,
-      body: SafeArea(
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop) return;
+        ProximitySensor.setProximityScreenOff(false);
+        if (_controller.callState == 7) {
+          if (widget.exitOnEnd) {
+            SystemNavigator.pop();
+          } else if (Navigator.canPop(context)) {
+            Navigator.pop(context, _controller.dtmfInput);
+          } else {
+            SystemNavigator.pop();
+          }
+        } else {
+          // While call is ringing or active, back button minimizes UI while call continues in notification
+          if (Navigator.canPop(context)) {
+            Navigator.pop(context);
+          } else {
+            SystemNavigator.pop();
+          }
+        }
+      },
+      child: Scaffold(
+        backgroundColor: _bg,
+        resizeToAvoidBottomInset: false,
+        body: SafeArea(
         child: Column(
           children: [
             const SizedBox(height: 24),
             
-            if (!_showKeypad) ...[
+            if (!_controller.showKeypad) ...[
               // Subtle Metadata
               Center(
                 child: Text(
-                  _getMetadataString(),
+                  _controller.getMetadataString(),
                   style: TextStyle(
                     fontSize: 14, 
                     color: Colors.white.withOpacity(0.5), 
@@ -459,7 +198,7 @@ class _CallScreenState extends State<CallScreen> {
                 padding: const EdgeInsets.symmetric(horizontal: 32),
                 child: Center(
                   child: Text(
-                    _name ?? _number,
+                    _controller.name ?? _controller.number,
                     textAlign: TextAlign.center,
                     style: const TextStyle(
                       fontSize: 42, 
@@ -472,7 +211,7 @@ class _CallScreenState extends State<CallScreen> {
                   ),
                 ),
               ),
-              if (_isSpam) ...[
+              if (_controller.isSpam) ...[
                 const SizedBox(height: 12),
                 Center(
                   child: Container(
@@ -506,11 +245,11 @@ class _CallScreenState extends State<CallScreen> {
               // Status / Timer / Number
               Center(
                 child: Text(
-                  _getStateString(),
+                  _controller.getStateString(),
                   style: TextStyle(
                     fontSize: 18, 
-                    color: _callState == 4 ? _iosGreen : Colors.white.withOpacity(0.5), 
-                    fontWeight: _callState == 4 ? FontWeight.bold : FontWeight.normal
+                    color: _controller.callState == 4 ? _iosGreen : Colors.white.withOpacity(0.5), 
+                    fontWeight: _controller.callState == 4 ? FontWeight.bold : FontWeight.normal
                   ),
                 ),
               ),
@@ -520,12 +259,12 @@ class _CallScreenState extends State<CallScreen> {
 
             const Spacer(),
 
-            if (_showKeypad) ...[
+            if (_controller.showKeypad) ...[
               Container(
                 height: 50,
                 alignment: Alignment.center,
                 child: Text(
-                  _dtmfInput.isEmpty ? " " : _dtmfInput,
+                  _controller.dtmfInput.isEmpty ? " " : _controller.dtmfInput,
                   style: const TextStyle(fontSize: 32, color: Colors.white, fontWeight: FontWeight.w500, letterSpacing: 2),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
@@ -576,11 +315,11 @@ class _CallScreenState extends State<CallScreen> {
               ),
               const SizedBox(height: 40),
               GestureDetector(
-                onTap: () => setState(() => _showKeypad = false),
+                onTap: _controller.toggleKeypad,
                 child: const Center(child: Text('Hide', style: TextStyle(fontSize: 18, color: Colors.white))),
               ),
               const SizedBox(height: 40),
-            ] else if (_callState != 2 && _callState != 7) ...[
+            ] else if (_controller.callState != 2 && _controller.callState != 7) ...[
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 45),
                 child: Column(
@@ -591,30 +330,24 @@ class _CallScreenState extends State<CallScreen> {
                         _buildControlButton(
                           icon: Icons.mic_off_rounded,
                           label: 'mute',
-                          onTap: () {
-                            setState(() => _isMuted = !_isMuted);
-                            TelecomService.setMuted(_isMuted);
-                          },
-                          isActive: _isMuted,
+                          onTap: _controller.toggleMute,
+                          isActive: _controller.isMuted,
                         ),
                         _buildControlButton(
                           icon: Icons.dialpad_rounded,
                           label: 'keypad',
-                          onTap: () => setState(() => _showKeypad = true),
+                          onTap: _controller.toggleKeypad,
                         ),
                         _buildControlButton(
                           icon: Icons.volume_up_rounded,
                           label: 'speaker',
-                          onTap: () {
-                            setState(() => _isSpeakerOn = !_isSpeakerOn);
-                            TelecomService.setSpeaker(_isSpeakerOn);
-                          },
-                          isActive: _isSpeakerOn,
+                          onTap: _controller.toggleSpeaker,
+                          isActive: _controller.isSpeakerOn,
                         ),
                       ],
                     ),
                     const SizedBox(height: 24),
-                    if (_callCount >= 2) ...[
+                    if (_controller.callCount >= 2) ...[
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
@@ -622,26 +355,21 @@ class _CallScreenState extends State<CallScreen> {
                             icon: Icons.merge_type_rounded,
                             label: 'merge',
                             onTap: () async {
-                              setState(() {
-                                _isHold = false;
-                                _callCount = 1;
-                                _name = 'Conference Call';
-                              });
-                              await TelecomService.mergeCall();
+                              _controller.mergeCall();
                               await Future.delayed(const Duration(milliseconds: 600));
-                              await _updateCallCount();
+                              await _controller.updateCallCount();
                             },
                           ),
                           _buildControlButton(
                             icon: Icons.swap_calls_rounded,
                             label: 'swap',
-                            onTap: () => TelecomService.swapCall(),
+                            onTap: _controller.swapCall,
                           ),
                           _buildControlButton(
                             icon: Icons.fiber_manual_record_rounded,
                             label: 'record',
-                            onTap: _toggleRecording,
-                            isActive: _isRecording,
+                            onTap: _controller.toggleRecording,
+                            isActive: _controller.isRecording,
                           ),
                         ],
                       ),
@@ -653,14 +381,11 @@ class _CallScreenState extends State<CallScreen> {
                             icon: Icons.add_rounded,
                             label: 'add call',
                             onTap: () async {
-                              // Hold the current call first
-                              if (!_isHold) {
-                                setState(() => _isHold = true);
-                                await TelecomService.setHold(true);
+                              if (!_controller.isHold) {
+                                _controller.toggleHold();
                                 await Future.delayed(const Duration(milliseconds: 300));
                               }
                               if (!mounted) return;
-                              // Show options: Dialpad or Contacts
                               showModalBottomSheet(
                                 context: context,
                                 backgroundColor: const Color(0xFF1C1C1E),
@@ -719,25 +444,14 @@ class _CallScreenState extends State<CallScreen> {
                           _buildControlButton(
                             icon: Icons.pause_rounded,
                             label: 'hold',
-                            onTap: () async {
-                              if (_isHoldActionPending) return;
-                              setState(() => _isHoldActionPending = true);
-                              
-                              final newHoldState = !_isHold;
-                              setState(() => _isHold = newHoldState);
-                              await TelecomService.setHold(newHoldState);
-                              
-                              // Allow next action after short delay
-                              await Future.delayed(const Duration(milliseconds: 500));
-                              if (mounted) setState(() => _isHoldActionPending = false);
-                            },
-                            isActive: _isHold,
+                            onTap: _controller.toggleHold,
+                            isActive: _controller.isHold,
                           ),
                           _buildControlButton(
                             icon: Icons.fiber_manual_record_rounded,
                             label: 'record',
-                            onTap: _toggleRecording,
-                            isActive: _isRecording,
+                            onTap: _controller.toggleRecording,
+                            isActive: _controller.isRecording,
                           ),
                         ],
                       ),
@@ -750,7 +464,7 @@ class _CallScreenState extends State<CallScreen> {
 
             Padding(
               padding: const EdgeInsets.only(bottom: 80, left: 48, right: 48),
-              child: _callState == 2
+              child: _controller.callState == 2
                   ? Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
@@ -774,7 +488,7 @@ class _CallScreenState extends State<CallScreen> {
                         label: 'End Call',
                         color: _iosRed,
                         onTap: () {
-                          if (_callState != 7) TelecomService.endCall();
+                          if (_controller.callState != 7) TelecomService.endCall();
                         },
                       ),
                     ),
@@ -782,7 +496,7 @@ class _CallScreenState extends State<CallScreen> {
           ],
         ),
       ),
-    );
+    ));
   }
 
   Widget _buildAction({

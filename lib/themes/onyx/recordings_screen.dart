@@ -4,9 +4,9 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_contacts/flutter_contacts.dart';
-import 'package:audioplayers/audioplayers.dart';
 import 'package:intl/intl.dart';
 import 'dart:ui';
+import 'package:wavedialer/logic/recordings_controller.dart';
 
 const _bg           = Color(0xFF000000);
 const _card         = Color(0xFF1C1C1E);
@@ -17,21 +17,7 @@ const _iosTertiary  = Color(0xFF48484A);
 const _iosSeparator    = Color(0xFF38383A);
 const _iosRed       = Color(0xFFFF3B30);
 
-class RecordingItem {
-  final File file;
-  final String number;
-  final DateTime timestamp;
-  Contact? contact;
-  Duration? duration;
 
-  RecordingItem({
-    required this.file,
-    required this.number,
-    required this.timestamp,
-    this.contact,
-    this.duration,
-  });
-}
 
 class RecordingsScreen extends StatefulWidget {
   const RecordingsScreen({super.key});
@@ -41,266 +27,39 @@ class RecordingsScreen extends StatefulWidget {
 }
 
 class _RecordingsScreenState extends State<RecordingsScreen> with WidgetsBindingObserver {
-  String _searchQuery = '';
+  final RecordingsController _controller = RecordingsController();
   final TextEditingController _searchCtrl = TextEditingController();
-  List<RecordingItem> _allRecordings = [];
-  List<RecordingItem> _filteredRecordings = [];
-  bool _isLoading = true;
-
-  // Audio Player State
-  final AudioPlayer _audioPlayer = AudioPlayer();
-  RecordingItem? _currentlyPlaying;
-  bool _isPlaying = false;
-  Duration _duration = Duration.zero;
-  Duration _position = Duration.zero;
-  RecordingItem? _expandedItem; // tracks which card is expanded
-
-  StreamSubscription<FileSystemEvent>? _dirWatcher;
-
-  String _normalizeDigits(String value) => value.replaceAll(RegExp(r'\D'), '');
-
-  Contact? _matchBestContact(List<Contact> contacts, String number) {
-    final cleanNum = _normalizeDigits(number);
-    if (cleanNum.length < 7) return null;
-
-    Contact? bestContact;
-    var bestScore = -1;
-
-    for (final contact in contacts) {
-      for (final phone in contact.phones) {
-        final cleanPhone = _normalizeDigits(phone.number);
-        if (cleanPhone.length < 7) continue;
-
-        final minLen = cleanPhone.length < cleanNum.length ? cleanPhone.length : cleanNum.length;
-        var suffixMatch = 0;
-        for (var i = 1; i <= minLen; i++) {
-          if (cleanPhone[cleanPhone.length - i] == cleanNum[cleanNum.length - i]) {
-            suffixMatch++;
-          } else {
-            break;
-          }
-        }
-
-        if (suffixMatch > bestScore) {
-          bestScore = suffixMatch;
-          bestContact = contact;
-        }
-      }
-    }
-
-    return bestScore >= 7 ? bestContact : null;
-  }
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _loadRecordings();
-    _startDirectoryWatch();
-
-    _audioPlayer.onPlayerStateChanged.listen((state) {
-      if (mounted) setState(() => _isPlaying = state == PlayerState.playing);
-    });
-    _audioPlayer.onDurationChanged.listen((d) {
-      if (mounted) setState(() => _duration = d);
-    });
-    _audioPlayer.onPositionChanged.listen((p) {
-      if (mounted) setState(() => _position = p);
-    });
-    _audioPlayer.onPlayerComplete.listen((_) {
-      if (mounted) setState(() {
-        _isPlaying = false;
-        _position = Duration.zero;
-        _currentlyPlaying = null;
-      });
-    });
-  }
-
-  void _startDirectoryWatch() {
-    try {
-      final dir = Directory('/storage/emulated/0/Music/OnyxDialer');
-      if (dir.existsSync()) {
-        _dirWatcher = dir.watch().listen((_) {
-          _loadRecordings();
-        });
-      }
-    } catch (_) {}
+    _controller.init();
+    _controller.addListener(_onControllerChange);
   }
 
   @override
   void dispose() {
-    _dirWatcher?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     _searchCtrl.dispose();
-    _audioPlayer.dispose();
+    _controller.removeListener(_onControllerChange);
+    _controller.dispose();
     super.dispose();
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
-      _loadRecordings();
+      _controller.loadRecordings();
     }
   }
 
-  Future<void> _loadRecordings() async {
-    if (mounted) setState(() => _isLoading = true);
-
-    try {
-      final possiblePaths = [
-        '/storage/emulated/0/Music/OnyxDialer',
-        '/sdcard/Music/OnyxDialer',
-      ];
-
-      final List<File> files = [];
-      for (final p in possiblePaths) {
-        final dir = Directory(p);
-        if (await dir.exists()) {
-          final found = dir
-              .listSync()
-              .whereType<File>()
-              .where((f) => f.path.endsWith('.wav') || f.path.endsWith('.m4a'));
-          for (final f in found) {
-            final filename = f.path.split('/').last;
-            if (!files.any((existing) => existing.path.split('/').last == filename)) {
-              files.add(f);
-            }
-          }
-        }
-      }
-
-      if (files.isEmpty) {
-        if (mounted) setState(() {
-          _allRecordings = [];
-          _filteredRecordings = [];
-          _isLoading = false;
-        });
-        return;
-      }
-
-      files.sort((a, b) => b.lastModifiedSync().compareTo(a.lastModifiedSync()));
-
-      final contacts = await FlutterContacts.getAll(properties: {ContactProperty.phone});
-
-      final List<RecordingItem> items = [];
-      for (final file in files) {
-        final filename = file.path.split('/').last;
-        final ext = filename.endsWith('.wav') ? '.wav' : '.m4a';
-        final stem = filename.substring(0, filename.length - ext.length);
-        final separatorIndex = stem.lastIndexOf('_');
-
-        String number = 'Unknown';
-        DateTime timestamp = file.lastModifiedSync();
-
-        if (separatorIndex > 0) {
-          final rawNumber = stem.substring(0, separatorIndex);
-          final rawTimestamp = stem.substring(separatorIndex + 1);
-
-          number = rawNumber.startsWith('Call_') ? rawNumber.substring(5) : rawNumber;
-          final timeMillis = int.tryParse(rawTimestamp);
-          if (timeMillis != null) {
-            timestamp = DateTime.fromMillisecondsSinceEpoch(timeMillis);
-          }
-        }
-
-        final matchedContact = _matchBestContact(contacts, number);
-
-        items.add(RecordingItem(
-          file: file,
-          number: number,
-          timestamp: timestamp,
-          contact: matchedContact,
-        ));
-      }
-
-      if (mounted) setState(() {
-        _allRecordings = items;
-        _filterRecordings();
-        _isLoading = false;
-      });
-    } catch (e) {
-      debugPrint('Error loading recordings: $e');
-      if (mounted) setState(() => _isLoading = false);
-    }
-  }
-
-  void _filterRecordings() {
-    if (_searchQuery.isEmpty) {
-      _filteredRecordings = List.from(_allRecordings);
-    } else {
-      final query = _searchQuery.toLowerCase();
-      _filteredRecordings = _allRecordings.where((item) {
-        final nameMatch = item.contact?.displayName?.toLowerCase().contains(query) ?? false;
-        final numMatch = item.number.contains(query);
-        return nameMatch || numMatch;
-      }).toList();
-    }
-  }
-
-  Future<void> _playOrPause(RecordingItem item) async {
-    HapticFeedback.lightImpact();
-    if (_currentlyPlaying?.file.path == item.file.path) {
-      if (_isPlaying) {
-        await _audioPlayer.pause();
-      } else {
-        await _audioPlayer.resume();
-      }
-    } else {
-      await _audioPlayer.stop();
-      setState(() {
-        _currentlyPlaying = item;
-        _position = Duration.zero;
-        _duration = Duration.zero;
-      });
-      await _audioPlayer.play(DeviceFileSource(item.file.path));
-    }
-  }
-
-  Future<void> _toggleExpand(RecordingItem item) async {
-    HapticFeedback.selectionClick();
-
-    if (_expandedItem?.file.path != item.file.path) {
-      if (item.duration == null) {
-        try {
-          final tempPlayer = AudioPlayer();
-          await tempPlayer.setSourceDeviceFile(item.file.path);
-          final d = await tempPlayer.getDuration();
-          if (mounted && d != null) {
-            setState(() {
-              item.duration = d;
-            });
-          }
-          await tempPlayer.dispose();
-        } catch (_) {}
-      }
-    }
-
-    if (mounted) {
-      setState(() {
-        if (_expandedItem?.file.path == item.file.path) {
-          if (_currentlyPlaying?.file.path == item.file.path) {
-            _audioPlayer.stop();
-            _currentlyPlaying = null;
-            _isPlaying = false;
-          }
-          _expandedItem = null;
-        } else {
-          _expandedItem = item;
-        }
-      });
-    }
+  void _onControllerChange() {
+    if (mounted) setState(() {});
   }
 
   Future<void> _deleteRecording(RecordingItem item) async {
     HapticFeedback.mediumImpact();
-    if (_currentlyPlaying?.file.path == item.file.path) {
-      await _audioPlayer.stop();
-      setState(() {
-        _currentlyPlaying = null;
-        _isPlaying = false;
-      });
-    }
-
     final confirmed = await showCupertinoDialog<bool>(
       context: context,
       builder: (ctx) => BackdropFilter(
@@ -324,22 +83,8 @@ class _RecordingsScreenState extends State<RecordingsScreen> with WidgetsBinding
     );
 
     if (confirmed == true) {
-      try {
-        await item.file.delete();
-        setState(() {
-          _allRecordings.remove(item);
-          _filterRecordings();
-        });
-      } catch (e) {
-        debugPrint('Failed to delete: $e');
-      }
+      await _controller.deleteRecording(item);
     }
-  }
-
-  String _formatDuration(Duration d) {
-    final minutes = d.inMinutes.remainder(60).toString().padLeft(2, '0');
-    final seconds = d.inSeconds.remainder(60).toString().padLeft(2, '0');
-    return '$minutes:$seconds';
   }
 
   @override
@@ -387,10 +132,7 @@ class _RecordingsScreenState extends State<RecordingsScreen> with WidgetsBinding
                         child: TextField(
                           controller: _searchCtrl,
                           onChanged: (v) {
-                            setState(() {
-                              _searchQuery = v;
-                              _filterRecordings();
-                            });
+                            _controller.rebuild(v);
                           },
                           style: const TextStyle(color: _iosLabel, fontSize: 15),
                           decoration: const InputDecoration(
@@ -403,14 +145,11 @@ class _RecordingsScreenState extends State<RecordingsScreen> with WidgetsBinding
                           cursorColor: _iosBlue,
                         ),
                       ),
-                      if (_searchQuery.isNotEmpty)
+                      if (_controller.searchQuery.isNotEmpty)
                         GestureDetector(
                           onTap: () {
                             _searchCtrl.clear();
-                            setState(() {
-                              _searchQuery = '';
-                              _filterRecordings();
-                            });
+                            _controller.rebuild('');
                             FocusScope.of(context).unfocus();
                           },
                           child: const Padding(
@@ -424,9 +163,9 @@ class _RecordingsScreenState extends State<RecordingsScreen> with WidgetsBinding
               ),
 
               Expanded(
-                child: _isLoading
+                child: _controller.isLoading
                     ? const Center(child: CircularProgressIndicator(color: _iosBlue))
-                    : _allRecordings.isEmpty
+                    : _controller.allRecordings.isEmpty
                         ? const Center(
                             child: Column(
                               mainAxisSize: MainAxisSize.min,
@@ -441,18 +180,18 @@ class _RecordingsScreenState extends State<RecordingsScreen> with WidgetsBinding
                             ),
                           )
                         : RefreshIndicator(
-                            onRefresh: _loadRecordings,
+                            onRefresh: _controller.loadRecordings,
                             color: _iosBlue,
                             backgroundColor: _card,
                             child: ListView.builder(
                               physics: const AlwaysScrollableScrollPhysics(),
                               padding: const EdgeInsets.only(left: 16, right: 16, bottom: 100),
-                              itemCount: _filteredRecordings.length,
+                              itemCount: _controller.filteredRecordings.length,
                               itemBuilder: (context, index) {
-                                final item = _filteredRecordings[index];
-                                final isExpanded = _expandedItem?.file.path == item.file.path;
-                                final isPlayingThis = _currentlyPlaying?.file.path == item.file.path;
-                                final isLast = index == _filteredRecordings.length - 1;
+                                final item = _controller.filteredRecordings[index];
+                                final isExpanded = _controller.expandedItem?.file.path == item.file.path;
+                                final isPlayingThis = _controller.currentlyPlaying?.file.path == item.file.path;
+                                final isLast = index == _controller.filteredRecordings.length - 1;
                                 final isFirst = index == 0;
                                 
                                 return _buildRecordingItem(item, isExpanded, isPlayingThis, isFirst, isLast);
@@ -486,7 +225,7 @@ class _RecordingsScreenState extends State<RecordingsScreen> with WidgetsBinding
         child: Column(
           children: [
             GestureDetector(
-              onTap: () => _toggleExpand(item),
+              onTap: () => _controller.toggleExpand(item),
               behavior: HitTestBehavior.opaque,
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(14, 12, 12, 12),
@@ -541,13 +280,13 @@ class _RecordingsScreenState extends State<RecordingsScreen> with WidgetsBinding
                           thumbColor: _iosLabel,
                         ),
                         child: Slider(
-                          value: isPlayingThis ? _position.inMilliseconds.toDouble() : 0,
+                          value: isPlayingThis ? _controller.position.inMilliseconds.toDouble() : 0,
                           min: 0.0,
-                          max: isPlayingThis && _duration.inMilliseconds > 0
-                              ? _duration.inMilliseconds.toDouble()
+                          max: isPlayingThis && _controller.duration.inMilliseconds > 0
+                              ? _controller.duration.inMilliseconds.toDouble()
                               : 1.0,
                           onChanged: isPlayingThis
-                              ? (value) => _audioPlayer.seek(Duration(milliseconds: value.toInt()))
+                              ? (value) => _controller.audioPlayer.seek(Duration(milliseconds: value.toInt()))
                               : null,
                         ),
                       ),
@@ -556,12 +295,12 @@ class _RecordingsScreenState extends State<RecordingsScreen> with WidgetsBinding
                         child: Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            Text(isPlayingThis ? _formatDuration(_position) : '00:00',
+                            Text(isPlayingThis ? _controller.formatDuration(_controller.position) : '00:00',
                                 style: const TextStyle(color: _iosSecondary, fontSize: 12)),
                             Text(
                                 isPlayingThis
-                                    ? '-${_formatDuration(_duration - _position)}'
-                                    : (item.duration != null ? _formatDuration(item.duration!) : '--:--'),
+                                    ? '-${_controller.formatDuration(_controller.duration - _controller.position)}'
+                                    : (item.duration != null ? _controller.formatDuration(item.duration!) : '--:--'),
                                 style: const TextStyle(color: _iosSecondary, fontSize: 12)),
                           ],
                         ),
@@ -582,8 +321,8 @@ class _RecordingsScreenState extends State<RecordingsScreen> with WidgetsBinding
                           GestureDetector(
                             onTap: () {
                               if (isPlayingThis) {
-                                final newPos = _position - const Duration(seconds: 15);
-                                _audioPlayer.seek(newPos < Duration.zero ? Duration.zero : newPos);
+                                final newPos = _controller.position - const Duration(seconds: 15);
+                                _controller.audioPlayer.seek(newPos < Duration.zero ? Duration.zero : newPos);
                               }
                             },
                             behavior: HitTestBehavior.opaque,
@@ -595,12 +334,12 @@ class _RecordingsScreenState extends State<RecordingsScreen> with WidgetsBinding
                           ),
                           const SizedBox(width: 8),
                           GestureDetector(
-                            onTap: () => _playOrPause(item),
+                            onTap: () => _controller.playOrPause(item),
                             behavior: HitTestBehavior.opaque,
                             child: Container(
                               padding: const EdgeInsets.all(12),
                               child: Icon(
-                                isPlayingThis && _isPlaying
+                                isPlayingThis && _controller.isPlaying
                                     ? CupertinoIcons.pause_circle_fill
                                     : CupertinoIcons.play_circle_fill,
                                 color: _iosLabel,
@@ -612,8 +351,8 @@ class _RecordingsScreenState extends State<RecordingsScreen> with WidgetsBinding
                           GestureDetector(
                             onTap: () {
                               if (isPlayingThis) {
-                                final newPos = _position + const Duration(seconds: 15);
-                                _audioPlayer.seek(newPos > _duration ? _duration : newPos);
+                                final newPos = _controller.position + const Duration(seconds: 15);
+                                _controller.audioPlayer.seek(newPos > _controller.duration ? _controller.duration : newPos);
                               }
                             },
                             behavior: HitTestBehavior.opaque,
@@ -655,11 +394,11 @@ class _RecordingsScreenState extends State<RecordingsScreen> with WidgetsBinding
         CupertinoContextMenuAction(
           onPressed: () {
             Navigator.pop(context);
-            _playOrPause(item);
+            _controller.playOrPause(item);
           },
           isDefaultAction: true,
-          trailingIcon: isPlayingThis && _isPlaying ? CupertinoIcons.pause : CupertinoIcons.play,
-          child: Text(isPlayingThis && _isPlaying ? 'Pause' : 'Play'),
+          trailingIcon: isPlayingThis && _controller.isPlaying ? CupertinoIcons.pause : CupertinoIcons.play,
+          child: Text(isPlayingThis && _controller.isPlaying ? 'Pause' : 'Play'),
         ),
         CupertinoContextMenuAction(
           onPressed: () {

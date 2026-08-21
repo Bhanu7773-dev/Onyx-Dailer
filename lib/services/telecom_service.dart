@@ -241,4 +241,16 @@ class TelecomService {
       _isShizukuRecording = false;
     }
   }
+
+  static Future<Map<String, dynamic>> handleSecretCode(String code) async {
+    try {
+      final res = await _methodChannel.invokeMethod('handleSecretCode', {'code': code});
+      if (res != null) {
+        return Map<String, dynamic>.from(res as Map);
+      }
+    } catch (e) {
+      debugPrint('TelecomService: handleSecretCode failed: $e');
+    }
+    return {'handled': false};
+  }
 }

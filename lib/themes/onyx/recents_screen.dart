@@ -1,14 +1,11 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/services.dart';
 import 'package:call_log/call_log.dart';
-import 'package:intl/intl.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'package:wavedialer/screens/call_screen.dart';
-import 'package:wavedialer/screens/settings_screen.dart';
+import 'package:wavedialer/themes/onyx/settings_screen.dart';
 import 'package:wavedialer/services/telecom_service.dart';
+import 'package:wavedialer/logic/recents_controller.dart';
 import 'package:wavedialer/widgets/contact_details_sheet.dart';
 import 'package:wavedialer/widgets/contact_dialogs.dart';
 import 'package:flutter_contacts/flutter_contacts.dart';
@@ -24,8 +21,6 @@ const _iosLabel = Color(0xFFFFFFFF);
 const _iosSecondary = Color(0xFF8E8E93);
 const _iosTertiary = Color(0xFF48484A);
 
-enum _Filter { all, incoming, outgoing, missed }
-
 class RecentsScreen extends StatefulWidget {
   const RecentsScreen({super.key});
 
@@ -34,18 +29,16 @@ class RecentsScreen extends StatefulWidget {
 }
 
 class _RecentsScreenState extends State<RecentsScreen> with WidgetsBindingObserver {
-  List<CallLogEntry>? _callLogs;
-  _Filter _filter = _Filter.all;
-  Set<String> _blockedNumbers = {};
+  final RecentsController _controller = RecentsController();
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _controller.addListener(_onControllerChange);
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      // Delay initial fetch slightly to keep startup smooth
       Future.delayed(const Duration(seconds: 1), () {
-        if (mounted) _fetchCallLogs();
+        _controller.fetchCallLogs();
       });
     });
   }
@@ -53,120 +46,27 @@ class _RecentsScreenState extends State<RecentsScreen> with WidgetsBindingObserv
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _controller.removeListener(_onControllerChange);
+    _controller.dispose();
     super.dispose();
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
-      _fetchCallLogs();
+      _controller.fetchCallLogs();
     }
   }
 
-  Future<void> _fetchCallLogs() async {
-    final now = DateTime.now();
-    final thirtyDaysAgo = now.subtract(const Duration(days: 30));
-    
-    // Fetch logs and blocked numbers in parallel for speed
-    final futures = await Future.wait([
-      CallLog.query(dateFrom: thirtyDaysAgo.millisecondsSinceEpoch),
-      FlutterContacts.blockedNumbers.isAvailable(),
-    ]);
-
-    final entries = futures[0] as Iterable<CallLogEntry>;
-    final isBlockedAvailable = futures[1] as bool;
-    
-    Set<String> blockedNums = {};
-    if (isBlockedAvailable) {
-      try {
-        final blocked = await FlutterContacts.blockedNumbers.getAll();
-        blockedNums = blocked.map((p) => p.number.replaceAll(RegExp(r'\D'), '')).toSet();
-      } catch (_) {}
-    }
-
-    if (mounted) {
-      setState(() {
-        _callLogs = List<CallLogEntry>.from(entries);
-        _blockedNumbers = blockedNums;
-      });
-    }
-  }
-
-  bool _isNumberBlocked(String? number) {
-    if (number == null) return false;
-    final clean = number.replaceAll(RegExp(r'\D'), '');
-    return _blockedNumbers.contains(clean);
-  }
-
-  bool _isMissed(CallType? t) =>
-      t == CallType.missed || t == CallType.rejected;
-
-  List<CallLogEntry> get _filtered {
-    if (_callLogs == null) return [];
-    switch (_filter) {
-      case _Filter.all:      return _callLogs!;
-      case _Filter.incoming: return _callLogs!.where((e) => e.callType == CallType.incoming).toList();
-      case _Filter.outgoing: return _callLogs!.where((e) => e.callType == CallType.outgoing).toList();
-      case _Filter.missed:   return _callLogs!.where((e) => _isMissed(e.callType)).toList();
-    }
-  }
-
-
-  Map<String, List<CallLogEntry>> _grouped(List<CallLogEntry> logs) {
-    final now = DateTime.now();
-    final today = DateTime(now.year, now.month, now.day);
-    final yesterday = today.subtract(const Duration(days: 1));
-
-    final Map<String, List<CallLogEntry>> groups = {};
-    for (final log in logs) {
-      final dt = DateTime.fromMillisecondsSinceEpoch(log.timestamp ?? 0);
-      final day = DateTime(dt.year, dt.month, dt.day);
-
-      String label;
-      if (day == today) {
-        label = 'Today';
-      } else if (day == yesterday) {
-        label = 'Yesterday';
-      } else if (now.difference(day).inDays < 7) {
-        label = DateFormat('EEEE').format(dt); // Monday, Tuesday…
-      } else {
-        label = DateFormat('MMMM d, y').format(dt);
-      }
-      groups.putIfAbsent(label, () => []).add(log);
-    }
-    return groups;
-  }
-
-  String _formatTime(int? ms) {
-    if (ms == null) return '';
-    return DateFormat('h:mm a').format(DateTime.fromMillisecondsSinceEpoch(ms));
-  }
-
-  String _callTypeLabel(CallType? t) {
-    switch (t) {
-      case CallType.incoming: return 'Incoming';
-      case CallType.outgoing: return 'Outgoing';
-      case CallType.missed:   return 'Missed';
-      case CallType.rejected: return 'Declined';
-      default: return 'Unknown';
-    }
-  }
-
-  IconData _callTypeIcon(CallType? t) {
-    switch (t) {
-      case CallType.incoming: return Icons.call_received_rounded;
-      case CallType.outgoing: return Icons.call_made_rounded;
-      case CallType.missed:
-      case CallType.rejected: return Icons.call_missed_rounded;
-      default: return Icons.call;
-    }
+  void _onControllerChange() {
+    if (mounted) setState(() {});
   }
 
   void _showSettingsSheet() {
     Navigator.push(
       context,
       MaterialPageRoute(builder: (_) => const SettingsScreen()),
-    ).then((_) => _fetchCallLogs());
+    ).then((_) => _controller.fetchCallLogs());
   }
 
   void _showAboutSheet() {
@@ -217,10 +117,7 @@ class _RecentsScreenState extends State<RecentsScreen> with WidgetsBindingObserv
   }
 
   Future<void> _dial(String? number) async {
-    if (number == null || number.isEmpty) return;
-    HapticFeedback.lightImpact();
-    TelecomService.handleOutgoingCall(context, number);
-    _fetchCallLogs();
+    await _controller.dial(context, number);
   }
 
   Future<void> _openDetails(CallLogEntry log) async {
@@ -231,16 +128,16 @@ class _RecentsScreenState extends State<RecentsScreen> with WidgetsBindingObserv
       name: name,
       phone: log.number!,
     );
-    _fetchCallLogs();
+    await _controller.fetchCallLogs();
   }
 
   Future<void> _handleEdit(String? number) async {
     if (number == null) return;
     final contacts = await FlutterContacts.getAll(filter: ContactFilter.phone(number));
     if (contacts.isNotEmpty) {
-      ContactDialogs.showEditContact(context, contacts.first, onDone: _fetchCallLogs);
+      ContactDialogs.showEditContact(context, contacts.first, onDone: _controller.fetchCallLogs);
     } else {
-      ContactDialogs.showNewContact(context, initialPhone: number, onDone: _fetchCallLogs);
+      ContactDialogs.showNewContact(context, initialPhone: number, onDone: _controller.fetchCallLogs);
     }
   }
 
@@ -276,7 +173,7 @@ class _RecentsScreenState extends State<RecentsScreen> with WidgetsBindingObserv
       return;
     }
 
-    final blocked = _isNumberBlocked(number);
+    final blocked = _controller.isNumberBlocked(number);
     final confirmed = await showCupertinoDialog<bool>(
       context: context,
       builder: (ctx) => BackdropFilter(
@@ -302,42 +199,17 @@ class _RecentsScreenState extends State<RecentsScreen> with WidgetsBindingObserv
     );
 
     if (confirmed == true) {
-      try {
-        if (blocked) {
-          await FlutterContacts.blockedNumbers.unblock(number);
-        } else {
-          await FlutterContacts.blockedNumbers.block(number);
-        }
-        _fetchCallLogs();
-      } catch (e) {
-        debugPrint('Failed to update blocked status: $e');
-      }
+      await _controller.blockNumber(number, blocked);
     }
   }
 
-  Future<void> _deleteLog(CallLogEntry log) async {
-    HapticFeedback.mediumImpact();
-    // For now, we remove it from the local list. 
-    // Since we are a root app, we could potentially delete from system provider here.
-    setState(() {
-      _callLogs?.removeWhere((e) => e.timestamp == log.timestamp && e.number == log.number);
-    });
-    
-    // Optional: Try system delete if root is available
-    try {
-      final id = log.timestamp; // We use timestamp as a pseudo-id if real id is missing
-      if (id != null) {
-        // This is a placeholder for actual system deletion logic if needed
-        debugPrint('Attempting to delete log entry at $id');
-      }
-    } catch (e) {
-      debugPrint('System delete failed: $e');
-    }
+  void _deleteLog(CallLogEntry log) {
+    _controller.deleteLog(log);
   }
 
   @override
   Widget build(BuildContext context) {
-    final grouped = _grouped(_filtered);
+    final grouped = _controller.getGroupedLogs(_controller.filteredLogs);
     final sectionKeys = grouped.keys.toList();
 
     return AnnotatedRegion<SystemUiOverlayStyle>(
@@ -402,13 +274,13 @@ class _RecentsScreenState extends State<RecentsScreen> with WidgetsBindingObserv
                   scrollDirection: Axis.horizontal,
                   child: Row(
                     children: [
-                      _filterChip('All',      Icons.call_rounded,          _Filter.all),
+                      _filterChip('All',      Icons.call_rounded,          CallFilter.all),
                       const SizedBox(width: 8),
-                      _filterChip('Incoming', Icons.call_received_rounded,  _Filter.incoming),
+                      _filterChip('Incoming', Icons.call_received_rounded,  CallFilter.incoming),
                       const SizedBox(width: 8),
-                      _filterChip('Outgoing', Icons.call_made_rounded,      _Filter.outgoing),
+                      _filterChip('Outgoing', Icons.call_made_rounded,      CallFilter.outgoing),
                       const SizedBox(width: 8),
-                      _filterChip('Missed',   Icons.call_missed_rounded,    _Filter.missed),
+                      _filterChip('Missed',   Icons.call_missed_rounded,    CallFilter.missed),
                       const SizedBox(width: 20),
                     ],
                   ),
@@ -417,7 +289,7 @@ class _RecentsScreenState extends State<RecentsScreen> with WidgetsBindingObserv
 
               // List
               Expanded(
-                child: _callLogs == null
+                child: _controller.callLogs == null
                     ? const Center(child: CircularProgressIndicator(color: _iosBlue))
                     : sectionKeys.isEmpty
                         ? Center(
@@ -427,9 +299,9 @@ class _RecentsScreenState extends State<RecentsScreen> with WidgetsBindingObserv
                                 Icon(Icons.call_outlined, size: 60, color: _iosTertiary),
                                 const SizedBox(height: 12),
                                 Text(
-                                  _filter == _Filter.missed ? 'No missed calls' :
-                                  _filter == _Filter.incoming ? 'No incoming calls' :
-                                  _filter == _Filter.outgoing ? 'No outgoing calls' :
+                                  _controller.filter == CallFilter.missed ? 'No missed calls' :
+                                  _controller.filter == CallFilter.incoming ? 'No incoming calls' :
+                                  _controller.filter == CallFilter.outgoing ? 'No outgoing calls' :
                                   'No recent calls',
                                   style: const TextStyle(color: _iosSecondary, fontSize: 17),
                                 ),
@@ -439,7 +311,7 @@ class _RecentsScreenState extends State<RecentsScreen> with WidgetsBindingObserv
                         : RefreshIndicator(
                             color: _iosBlue,
                             backgroundColor: _iosCard,
-                            onRefresh: _fetchCallLogs,
+                            onRefresh: _controller.fetchCallLogs,
                             child: ListView.builder(
                               padding: const EdgeInsets.only(bottom: 100),
                               itemCount: sectionKeys.length,
@@ -455,16 +327,16 @@ class _RecentsScreenState extends State<RecentsScreen> with WidgetsBindingObserv
     );
   }
 
-  Widget _filterChip(String label, IconData icon, _Filter f) {
-    final selected = _filter == f;
-    final chipColor = f == _Filter.missed ? _iosRed
-        : f == _Filter.incoming ? _iosBlue
-        : f == _Filter.outgoing ? const Color(0xFF34C759)
+  Widget _filterChip(String label, IconData icon, CallFilter f) {
+    final selected = _controller.filter == f;
+    final chipColor = f == CallFilter.missed ? _iosRed
+        : f == CallFilter.incoming ? _iosBlue
+        : f == CallFilter.outgoing ? const Color(0xFF34C759)
         : _iosBlue;
     return GestureDetector(
       onTap: () {
         HapticFeedback.selectionClick();
-        setState(() => _filter = f);
+        _controller.setFilter(f);
       },
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 150),
@@ -545,8 +417,8 @@ class _RecentsScreenState extends State<RecentsScreen> with WidgetsBindingObserv
   }
 
   Widget _callRow(CallLogEntry log, {required bool isLast}) {
-    final missed = _isMissed(log.callType);
-    final blocked = _isNumberBlocked(log.number);
+    final missed = _controller.isMissed(log.callType);
+    final blocked = _controller.isNumberBlocked(log.number);
     
     String name = (log.name?.isNotEmpty == true) ? log.name! : log.number ?? 'Unknown';
     if (log.name == null || log.name!.isEmpty) {
@@ -659,11 +531,11 @@ class _RecentsScreenState extends State<RecentsScreen> with WidgetsBindingObserv
                               const SizedBox(height: 2),
                               Row(
                                 children: [
-                                  Icon(_callTypeIcon(log.callType),
+                                  Icon(_controller.callTypeIcon(log.callType),
                                       size: 11, color: missed ? _iosRed : _iosSecondary),
                                   const SizedBox(width: 4),
                                   Text(
-                                    _callTypeLabel(log.callType),
+                                    _controller.callTypeLabel(log.callType),
                                     style: TextStyle(
                                         color: missed ? _iosRed : _iosSecondary,
                                         fontSize: 12),
@@ -676,7 +548,7 @@ class _RecentsScreenState extends State<RecentsScreen> with WidgetsBindingObserv
 
                         // Time
                         Text(
-                          _formatTime(log.timestamp),
+                          _controller.formatTime(log.timestamp),
                           style: const TextStyle(color: _iosSecondary, fontSize: 13),
                         ),
                         const SizedBox(width: 6),

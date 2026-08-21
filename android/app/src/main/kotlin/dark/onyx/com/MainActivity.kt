@@ -27,8 +27,10 @@ class MainActivity: FlutterActivity() {
     companion object {
         private const val METHOD_CHANNEL = "dark.onyx.com/telecom_commands"
         private const val EVENT_CHANNEL = "dark.onyx.com/telecom_events"
+        private const val REQUEST_PICK_IMAGE = 1001
         var isAppVisible = false
     }
+    private var pendingImageResult: MethodChannel.Result? = null
     private var eventSink: EventChannel.EventSink? = null
     private var toneGenerator: ToneGenerator? = null
     private var callRecorderService: ICallRecorderService? = null
@@ -67,6 +69,24 @@ class MainActivity: FlutterActivity() {
         setIntent(intent)
         if (intent.getBooleanExtra("incoming_call", false)) {
             turnScreenOnAndKeyguardOff()
+            val call = CallService.currentCall
+            if (call != null) {
+                val num = call.details?.handle?.schemeSpecificPart ?: intent.getStringExtra("incoming_number") ?: "Unknown"
+                val connectTime = call.details?.connectTimeMillis ?: 0L
+                val elapsedSeconds = if (connectTime > 0L && call.state == Call.STATE_ACTIVE) {
+                    Math.max(0, ((System.currentTimeMillis() - connectTime) / 1000).toInt())
+                } else 0
+                val data = mapOf(
+                    "state" to call.state,
+                    "number" to num,
+                    "name" to resolveContactName(num),
+                    "connectTime" to connectTime,
+                    "elapsedSeconds" to elapsedSeconds
+                )
+                runOnUiThread {
+                    eventSink?.success(data)
+                }
+            }
         }
     }
 
@@ -121,6 +141,36 @@ class MainActivity: FlutterActivity() {
     override fun onStop() {
         super.onStop()
         isAppVisible = false
+    }
+
+    override fun onKeyDown(keyCode: Int, event: android.view.KeyEvent?): Boolean {
+        if (keyCode == android.view.KeyEvent.KEYCODE_VOLUME_DOWN ||
+            keyCode == android.view.KeyEvent.KEYCODE_VOLUME_UP ||
+            keyCode == android.view.KeyEvent.KEYCODE_VOLUME_MUTE) {
+            if (CallService.currentCall?.state == Call.STATE_RINGING) {
+                CallService.instance?.silenceRinger()
+                return true
+            }
+        }
+        return super.onKeyDown(keyCode, event)
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == REQUEST_PICK_IMAGE) {
+            if (resultCode == RESULT_OK && data?.data != null) {
+                try {
+                    val bytes = contentResolver.openInputStream(data.data!!)?.use { it.readBytes() }
+                    pendingImageResult?.success(bytes)
+                } catch (e: Exception) {
+                    android.util.Log.e("OnyxMainActivity", "Failed to read image bytes: ${e.message}")
+                    pendingImageResult?.success(null)
+                }
+            } else {
+                pendingImageResult?.success(null)
+            }
+            pendingImageResult = null
+        }
     }
 
     private fun resolveContactName(number: String): String? {
@@ -386,25 +436,53 @@ class MainActivity: FlutterActivity() {
                     }
                 }
                 "isIncomingCallLaunch" -> {
-                    val isIncoming = intent.getBooleanExtra("incoming_call", false)
+                    val call = CallService.currentCall
+                    val isIncoming = intent.getBooleanExtra("incoming_call", false) || (call != null && (call.state == Call.STATE_RINGING || call.state == Call.STATE_ACTIVE || call.state == Call.STATE_DIALING || call.state == Call.STATE_CONNECTING))
                     intent.removeExtra("incoming_call") // Clear the extra so it doesn't trigger again on normal manual opens
                     if (isIncoming) {
-                        val number = intent.getStringExtra("incoming_number") ?: "Unknown"
-                        val state = intent.getIntExtra("incoming_state", 2)
-                        
-                        // Fast native contact lookup
-                        val contactName = resolveContactName(number)
+                        val number = intent.getStringExtra("incoming_number") ?: call?.details?.handle?.schemeSpecificPart ?: "Unknown"
+                        val state = if (intent.hasExtra("incoming_state")) intent.getIntExtra("incoming_state", 2) else (call?.state ?: 2)
+                        val contactName = intent.getStringExtra("incoming_name") ?: resolveContactName(number)
+                        val connectTime = call?.details?.connectTimeMillis ?: 0L
+                        val elapsedSeconds = if (connectTime > 0L && state == Call.STATE_ACTIVE) {
+                            Math.max(0, ((System.currentTimeMillis() - connectTime) / 1000).toInt())
+                        } else 0
                         
                         val map = mapOf(
                             "isIncoming" to true,
                             "number" to number,
                             "state" to state,
-                            "name" to contactName
+                            "name" to contactName,
+                            "connectTime" to connectTime,
+                            "elapsedSeconds" to elapsedSeconds
                         )
                         result.success(map)
                     } else {
                         result.success(mapOf("isIncoming" to false))
                     }
+                }
+                "getUserProfileAvatar" -> {
+                    val avatarBytes = getUserProfilePhoto()
+                    result.success(avatarBytes)
+                }
+                "pickGalleryImage" -> {
+                    pendingImageResult = result
+                    try {
+                        val intent = Intent(Intent.ACTION_GET_CONTENT).apply {
+                            type = "image/*"
+                            addCategory(Intent.CATEGORY_OPENABLE)
+                        }
+                        startActivityForResult(Intent.createChooser(intent, "Select Profile Picture"), REQUEST_PICK_IMAGE)
+                    } catch (e: Exception) {
+                        android.util.Log.e("OnyxMainActivity", "Launch gallery error: ${e.message}")
+                        pendingImageResult?.success(null)
+                        pendingImageResult = null
+                    }
+                }
+                "handleSecretCode" -> {
+                    val code = call.argument<String>("code") ?: ""
+                    val resultData = handleSecretCode(code)
+                    result.success(resultData)
                 }
                 "isShizukuServiceRunning" -> {
                     result.success(callRecorderService != null)
@@ -420,20 +498,32 @@ class MainActivity: FlutterActivity() {
                     CallService.listener = { call, state ->
                         runOnUiThread {
                             val num = call.details.handle?.schemeSpecificPart ?: "Unknown"
+                            val connectTime = call.details?.connectTimeMillis ?: 0L
+                            val elapsedSeconds = if (connectTime > 0L && state == Call.STATE_ACTIVE) {
+                                Math.max(0, ((System.currentTimeMillis() - connectTime) / 1000).toInt())
+                            } else 0
                             val data = mapOf(
                                 "state" to state,
                                 "number" to num,
-                                "name" to resolveContactName(num)
+                                "name" to resolveContactName(num),
+                                "connectTime" to connectTime,
+                                "elapsedSeconds" to elapsedSeconds
                             )
                             eventSink?.success(data)
                         }
                     }
                     CallService.currentCall?.let {
                         val num = it.details.handle?.schemeSpecificPart ?: "Unknown"
+                        val connectTime = it.details?.connectTimeMillis ?: 0L
+                        val elapsedSeconds = if (connectTime > 0L && it.state == Call.STATE_ACTIVE) {
+                            Math.max(0, ((System.currentTimeMillis() - connectTime) / 1000).toInt())
+                        } else 0
                         val data = mapOf(
                             "state" to it.state,
                             "number" to num,
-                            "name" to resolveContactName(num)
+                            "name" to resolveContactName(num),
+                            "connectTime" to connectTime,
+                            "elapsedSeconds" to elapsedSeconds
                         )
                         eventSink?.success(data)
                     }
@@ -499,5 +589,217 @@ class MainActivity: FlutterActivity() {
         toneGenerator?.release()
         toneGenerator = null
         super.onDestroy()
+    }
+
+    private fun getUserProfilePhoto(): ByteArray? {
+        // 1. Direct ContactsContract.Profile.CONTENT_URI photo
+        try {
+            val uri = Uri.withAppendedPath(android.provider.ContactsContract.Profile.CONTENT_URI, android.provider.ContactsContract.Contacts.Photo.CONTENT_DIRECTORY)
+            contentResolver.query(
+                uri,
+                arrayOf(android.provider.ContactsContract.Contacts.Photo.PHOTO),
+                null, null, null
+            )?.use {
+                if (it.moveToFirst()) {
+                    val blob = it.getBlob(0)
+                    if (blob != null && blob.isNotEmpty()) return blob
+                }
+            }
+        } catch (e: Exception) {
+            android.util.Log.d("OnyxMainActivity", "Profile photo query: ${e.message}")
+        }
+
+        // 2. Profile Raw Contacts Data
+        try {
+            val rawUri = Uri.withAppendedPath(android.provider.ContactsContract.Profile.CONTENT_RAW_CONTACTS_URI, "data")
+            contentResolver.query(
+                rawUri,
+                arrayOf(android.provider.ContactsContract.CommonDataKinds.Photo.PHOTO),
+                "${android.provider.ContactsContract.Data.MIMETYPE} = ?",
+                arrayOf(android.provider.ContactsContract.CommonDataKinds.Photo.CONTENT_ITEM_TYPE),
+                null
+            )?.use {
+                if (it.moveToFirst()) {
+                    val blob = it.getBlob(0)
+                    if (blob != null && blob.isNotEmpty()) return blob
+                }
+            }
+        } catch (e: Exception) {
+            android.util.Log.d("OnyxMainActivity", "Raw profile photo query: ${e.message}")
+        }
+
+        // 3. Contacts named 'Me', 'Owner', 'Myself'
+        try {
+            val projection = arrayOf(
+                android.provider.ContactsContract.CommonDataKinds.Photo.PHOTO,
+                android.provider.ContactsContract.CommonDataKinds.Photo.DISPLAY_NAME
+            )
+            val selection = "${android.provider.ContactsContract.Data.MIMETYPE} = ? AND (" +
+                    "${android.provider.ContactsContract.CommonDataKinds.Photo.DISPLAY_NAME} LIKE 'Me%' OR " +
+                    "${android.provider.ContactsContract.CommonDataKinds.Photo.DISPLAY_NAME} LIKE 'My%' OR " +
+                    "${android.provider.ContactsContract.CommonDataKinds.Photo.DISPLAY_NAME} LIKE 'Owner%')"
+            contentResolver.query(
+                android.provider.ContactsContract.Data.CONTENT_URI,
+                projection,
+                selection,
+                arrayOf(android.provider.ContactsContract.CommonDataKinds.Photo.CONTENT_ITEM_TYPE),
+                null
+            )?.use {
+                if (it.moveToFirst()) {
+                    val blob = it.getBlob(0)
+                    if (blob != null && blob.isNotEmpty()) return blob
+                }
+            }
+        } catch (e: Exception) {
+            android.util.Log.d("OnyxMainActivity", "Named profile search: ${e.message}")
+        }
+
+        return null
+    }
+
+    private fun handleSecretCode(code: String): Map<String, Any> {
+        val response = mutableMapOf<String, Any>("handled" to false)
+        try {
+            // 1. Handle *#06# (IMEI)
+            if (code == "*#06#" || code == "*#06") {
+                val telephonyManager = getSystemService(Context.TELEPHONY_SERVICE) as android.telephony.TelephonyManager
+                val imeis = mutableListOf<String>()
+                if (checkSelfPermission(android.Manifest.permission.READ_PHONE_STATE) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        try {
+                            val imei1 = telephonyManager.getImei(0)
+                            if (!imei1.isNullOrEmpty()) imeis.add("IMEI 1: $imei1")
+                            val imei2 = telephonyManager.getImei(1)
+                            if (!imei2.isNullOrEmpty()) imeis.add("IMEI 2: $imei2")
+                        } catch (e: Exception) {}
+                    }
+                    if (imeis.isEmpty()) {
+                        try {
+                            val deviceId = telephonyManager.deviceId
+                            if (!deviceId.isNullOrEmpty()) imeis.add("IMEI: $deviceId")
+                        } catch (e: Exception) {}
+                    }
+                }
+                if (imeis.isEmpty()) {
+                    imeis.add("IMEI information requires Phone permission")
+                }
+                response["handled"] = true
+                response["type"] = "imei"
+                response["info"] = imeis.joinToString("\n")
+                return response
+            }
+
+            // 2. Extract secret code digits from *#*#<code>#*#* or *#<code>#
+            var secretCode: String? = null
+            if (code.startsWith("*#*#") && code.endsWith("#*#*") && code.length >= 9) {
+                val inner = code.substring(4, code.length - 4)
+                if (inner.isNotEmpty() && !inner.contains("*") && !inner.contains("#")) {
+                    secretCode = inner
+                }
+            } else if (code.startsWith("*#") && code.endsWith("#") && code.length >= 4 && !code.startsWith("*#*#")) {
+                val inner = code.substring(2, code.length - 1)
+                if (inner.isNotEmpty() && !inner.contains("*") && !inner.contains("#")) {
+                    secretCode = inner
+                }
+            }
+
+            if (!secretCode.isNullOrEmpty()) {
+                val telephonyManager = getSystemService(Context.TELEPHONY_SERVICE) as android.telephony.TelephonyManager
+
+                // 1. Android Official API for Default Dialer (API 26+)
+                // Runs inside com.android.phone system process which has all permissions for TestingSettings, RadioInfo & OEM secret codes
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    try {
+                        telephonyManager.sendDialerSpecialCode(secretCode)
+                        android.util.Log.d("OnyxMainActivity", "sendDialerSpecialCode successfully dispatched for $secretCode")
+                        response["handled"] = true
+                        response["type"] = "special_code"
+                        return response
+                    } catch (e: Exception) {
+                        android.util.Log.e("OnyxMainActivity", "sendDialerSpecialCode error: ${e.message}")
+                    }
+                }
+
+                var launchedActivity = false
+
+                // 2. Fallback: If 4636 (INFO), try direct activity launches
+                if (secretCode == "4636" || secretCode.equals("INFO", ignoreCase = true)) {
+                    val candidates = listOf(
+                        Intent().setComponent(ComponentName("com.android.settings", "com.android.settings.RadioInfo")),
+                        Intent().setComponent(ComponentName("com.android.settings", "com.android.settings.TestingSettings")),
+                        Intent().setComponent(ComponentName("com.android.settings", "com.android.settings.Settings\$RadioInfoActivity")),
+                        Intent().setComponent(ComponentName("com.android.settings", "com.android.settings.Settings\$TestingSettingsActivity")),
+                        Intent().setComponent(ComponentName("com.android.phone", "com.android.phone.TestingSettings")),
+                        Intent().setComponent(ComponentName("com.android.phone", "com.android.phone.RadioInfo")),
+                        Intent("android.settings.TESTING_SETTINGS"),
+                        Intent("android.intent.action.MAIN").addCategory("android.intent.category.TESTING_SETTINGS")
+                    )
+
+                    for (intent in candidates) {
+                        try {
+                            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            startActivity(intent)
+                            launchedActivity = true
+                            break
+                        } catch (e: Exception) {
+                            android.util.Log.d("OnyxMainActivity", "TestingSettings candidate failed: ${e.message}")
+                        }
+                    }
+
+                    // If normal startActivity was blocked (e.g. unexported component), try root
+                    if (!launchedActivity) {
+                        try {
+                            val cmds = arrayOf(
+                                "am start -n com.android.settings/.RadioInfo",
+                                "am start -n com.android.settings/.TestingSettings",
+                                "am start -n com.android.settings/.Settings\\\$RadioInfoActivity",
+                                "am start -n com.android.settings/.Settings\\\$TestingSettingsActivity",
+                                "am start -n com.android.phone/.TestingSettings"
+                            ).joinToString(" || ")
+                            val process = Runtime.getRuntime().exec(arrayOf("su", "-c", cmds))
+                            val exit = process.waitFor()
+                            if (exit == 0) launchedActivity = true
+                        } catch (e: Exception) {
+                            android.util.Log.d("OnyxMainActivity", "Root activity start failed: ${e.message}")
+                        }
+                    }
+                }
+
+                // 2. Broadcast SECRET_CODE intent to system and OEM receivers
+                try {
+                    val secretUri = Uri.parse("android_secret_code://$secretCode")
+                    val secretIntent = Intent("android.provider.Telephony.SECRET_CODE", secretUri)
+
+                    // Find and trigger explicit broadcast receivers (bypasses Android 8+ background limits)
+                    val receivers = packageManager.queryBroadcastReceivers(secretIntent, 0)
+                    for (resolveInfo in receivers) {
+                        try {
+                            val explicitIntent = Intent(secretIntent).apply {
+                                component = ComponentName(resolveInfo.activityInfo.packageName, resolveInfo.activityInfo.name)
+                                flags = Intent.FLAG_RECEIVER_FOREGROUND or Intent.FLAG_INCLUDE_STOPPED_PACKAGES
+                            }
+                            sendBroadcast(explicitIntent)
+                        } catch (e: Exception) {}
+                    }
+
+                    secretIntent.addFlags(Intent.FLAG_RECEIVER_FOREGROUND or Intent.FLAG_INCLUDE_STOPPED_PACKAGES)
+                    sendBroadcast(secretIntent)
+                } catch (e: Exception) {
+                    android.util.Log.e("OnyxMainActivity", "Broadcast secret code failed: ${e.message}")
+                }
+
+                // Root broadcast fallback for OEM engineer modes
+                try {
+                    Runtime.getRuntime().exec(arrayOf("su", "-c", "am broadcast -a android.provider.Telephony.SECRET_CODE -d android_secret_code://$secretCode"))
+                } catch (e: Exception) {}
+
+                response["handled"] = true
+                response["type"] = if (launchedActivity) "activity" else "broadcast"
+                return response
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("OnyxMainActivity", "handleSecretCode error: ${e.message}")
+        }
+        return response
     }
 }

@@ -7,11 +7,11 @@ import 'package:animations/animations.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'package:wavedialer/screens/dialpad_screen.dart';
-import 'package:wavedialer/screens/contacts_screen.dart';
-import 'package:wavedialer/screens/recents_screen.dart';
-import 'package:wavedialer/screens/startup_screen.dart';
-import 'package:wavedialer/screens/recordings_screen.dart';
+import 'package:wavedialer/themes/onyx/dialpad_screen.dart';
+import 'package:wavedialer/themes/onyx/contacts_screen.dart';
+import 'package:wavedialer/themes/onyx/recents_screen.dart';
+import 'package:wavedialer/themes/onyx/startup_screen.dart';
+import 'package:wavedialer/themes/onyx/recordings_screen.dart';
 import 'package:wavedialer/services/telecom_service.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -473,7 +473,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
           Text('Recording', style: theme.textTheme.labelLarge?.copyWith(color: Colors.grey)),
           const SizedBox(height: 4),
           Text(
-            'Saves to: /storage/emulated/0/Music/OnyxDialer/',
+            'Saves to: /storage/emulated/0/Recordings/OnyxDialer/',
             style: theme.textTheme.bodySmall?.copyWith(color: Colors.grey),
           ),
           const SizedBox(height: 12),

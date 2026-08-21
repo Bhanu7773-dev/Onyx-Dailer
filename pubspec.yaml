@@ -79,3 +79,7 @@ flutter:
   assets:
     - assets/
 
+  fonts:
+    - family: NothingFont
+      fonts:
+        - asset: assets/nothing-font-5x7.otf

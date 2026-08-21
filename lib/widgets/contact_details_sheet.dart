@@ -4,7 +4,6 @@ import 'package:flutter/services.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'package:wavedialer/screens/call_screen.dart';
 import 'package:wavedialer/services/telecom_service.dart';
 
 const _bg           = Color(0xFF1C1C1E);
