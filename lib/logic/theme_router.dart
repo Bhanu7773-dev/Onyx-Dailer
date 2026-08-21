@@ -5,6 +5,7 @@ import 'package:wavedialer/themes/onyx/call_screen.dart' as onyx_call;
 import 'package:wavedialer/themes/onyx/settings_screen.dart' as onyx_settings;
 import 'package:wavedialer/themes/nothing/home_screen.dart' as nothing_home;
 import 'package:wavedialer/themes/nothing/settings_screen.dart' as nothing_settings;
+import 'package:wavedialer/themes/nothing/call_screen.dart' as nothing_call;
 
 class ThemeRouter {
   static Widget getStartupScreen(String theme) {
@@ -46,6 +47,13 @@ class ThemeRouter {
   }) {
     switch (theme) {
       case 'nothing':
+        return nothing_call.CallScreen(
+          initialNumber: initialNumber,
+          initialState: initialState,
+          initialName: initialName,
+          initialSeconds: initialSeconds,
+          exitOnEnd: exitOnEnd,
+        );
       case 'onyx':
       default:
         return onyx_call.CallScreen(
