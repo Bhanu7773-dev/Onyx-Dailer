@@ -39,7 +39,7 @@ class OtaUpdateService {
   OtaUpdateService._internal();
 
   static const MethodChannel _methodChannel = MethodChannel('dark.onyx.com/telecom_commands');
-  static const String _repoApiUrl = 'https://api.github.com/repos/Bhanu7773-dev/Onyx-Dailer/releases/latest';
+  static const String _releasesApiUrl = 'https://api.github.com/repos/Bhanu7773-dev/Onyx-Dailer/releases';
 
   UpdateInfo? lastCheckedUpdate;
   bool isChecking = false;
@@ -54,38 +54,56 @@ class OtaUpdateService {
     } catch (e) {
       debugPrint('OtaUpdateService: Error getting current version: $e');
     }
-    return '1.0.0';
+    return '1.0.1';
   }
 
-  /// Compares two semver strings (e.g. "1.0.1" > "1.0.0").
-  /// Returns true if [remoteTag] is strictly newer than [currentVersion].
-  bool isVersionNewer(String remoteTag, String currentVersion) {
+  /// Compares two semver strings (e.g. "v1.0.2" > "1.0.1", "2.0.0" > "1.0.1").
+  /// Returns:
+  ///   1 if versionA > versionB
+  ///  -1 if versionA < versionB
+  ///   0 if versionA == versionB
+  int compareVersions(String versionA, String versionB) {
     try {
-      final rClean = remoteTag.replaceAll(RegExp(r'[^0-9.]'), '');
-      final cClean = currentVersion.replaceAll(RegExp(r'[^0-9.]'), '');
+      final aMain = versionA.split('+').first.trim();
+      final bMain = versionB.split('+').first.trim();
 
-      final rParts = rClean.split('.').map((e) => int.tryParse(e) ?? 0).toList();
-      final cParts = cClean.split('.').map((e) => int.tryParse(e) ?? 0).toList();
+      final aParts = RegExp(r'\d+').allMatches(aMain).map((m) => int.parse(m.group(0)!)).toList();
+      final bParts = RegExp(r'\d+').allMatches(bMain).map((m) => int.parse(m.group(0)!)).toList();
 
-      while (rParts.length < 3) {
-        rParts.add(0);
+      final maxLen = aParts.length > bParts.length ? aParts.length : bParts.length;
+      while (aParts.length < maxLen) {
+        aParts.add(0);
       }
-      while (cParts.length < 3) {
-        cParts.add(0);
+      while (bParts.length < maxLen) {
+        bParts.add(0);
       }
 
-      for (int i = 0; i < 3; i++) {
-        if (rParts[i] > cParts[i]) return true;
-        if (rParts[i] < cParts[i]) return false;
+      for (int i = 0; i < maxLen; i++) {
+        if (aParts[i] > bParts[i]) return 1;
+        if (aParts[i] < bParts[i]) return -1;
       }
-      return false;
+
+      // Check build numbers if present (e.g. +2 vs +1)
+      if (versionA.contains('+') && versionB.contains('+')) {
+        final aBuild = int.tryParse(versionA.split('+').last) ?? 0;
+        final bBuild = int.tryParse(versionB.split('+').last) ?? 0;
+        if (aBuild > bBuild) return 1;
+        if (aBuild < bBuild) return -1;
+      }
+
+      return 0;
     } catch (e) {
-      debugPrint('OtaUpdateService: Version comparison failed: $e');
-      return remoteTag != currentVersion;
+      debugPrint('OtaUpdateService: Version compare error: $e');
+      return versionA.compareTo(versionB);
     }
   }
 
-  /// Checks GitHub releases API for latest release.
+  /// Returns true if [remoteTag] is strictly newer than [currentVersion].
+  bool isVersionNewer(String remoteTag, String currentVersion) {
+    return compareVersions(remoteTag, currentVersion) > 0;
+  }
+
+  /// Checks GitHub releases API and always targets the highest available version.
   Future<UpdateInfo?> checkForUpdate() async {
     if (isChecking) return lastCheckedUpdate;
     isChecking = true;
@@ -96,53 +114,70 @@ class OtaUpdateService {
         ..connectionTimeout = const Duration(seconds: 10)
         ..badCertificateCallback = ((_, __, ___) => true);
 
-      final request = await client.getUrl(Uri.parse(_repoApiUrl));
+      // Fetch all releases to find the highest release tag
+      final request = await client.getUrl(Uri.parse(_releasesApiUrl));
       request.headers.set('User-Agent', 'Onyx-Dialer-App');
       request.headers.set('Accept', 'application/vnd.github.v3+json');
 
       final response = await request.close();
       if (response.statusCode == 200) {
         final body = await response.transform(utf8.decoder).join();
-        final data = json.decode(body) as Map<String, dynamic>;
+        final list = json.decode(body) as List<dynamic>;
 
-        final tag = data['tag_name'] as String? ?? '';
-        final title = data['name'] as String? ?? tag;
-        final notes = data['body'] as String? ?? 'No release notes provided.';
-        final publishedStr = data['published_at'] as String?;
-        final publishedAt = publishedStr != null ? DateTime.tryParse(publishedStr) : null;
+        if (list.isNotEmpty) {
+          // Sort releases descending by version number to pick highest
+          Map<String, dynamic>? highestRelease;
+          for (final item in list) {
+            final rel = item as Map<String, dynamic>;
+            if (highestRelease == null) {
+              highestRelease = rel;
+            } else {
+              final tagCurr = rel['tag_name'] as String? ?? '';
+              final tagBest = highestRelease['tag_name'] as String? ?? '';
+              if (compareVersions(tagCurr, tagBest) > 0) {
+                highestRelease = rel;
+              }
+            }
+          }
 
-        // Find APK asset
-        final assets = (data['assets'] as List<dynamic>?) ?? [];
-        String? apkUrl;
-        int apkSize = 0;
+          if (highestRelease != null) {
+            final tag = highestRelease['tag_name'] as String? ?? '';
+            final title = highestRelease['name'] as String? ?? tag;
+            final notes = highestRelease['body'] as String? ?? 'No release notes provided.';
+            final publishedStr = highestRelease['published_at'] as String?;
+            final publishedAt = publishedStr != null ? DateTime.tryParse(publishedStr) : null;
 
-        for (final a in assets) {
-          final aName = (a['name'] as String? ?? '').toLowerCase();
-          if (aName.endsWith('.apk')) {
-            apkUrl = a['browser_download_url'] as String?;
-            apkSize = (a['size'] as int?) ?? 0;
-            break;
+            final assets = (highestRelease['assets'] as List<dynamic>?) ?? [];
+            String? apkUrl;
+            int apkSize = 0;
+
+            for (final a in assets) {
+              final aName = (a['name'] as String? ?? '').toLowerCase();
+              if (aName.endsWith('.apk')) {
+                apkUrl = a['browser_download_url'] as String?;
+                apkSize = (a['size'] as int?) ?? 0;
+                break;
+              }
+            }
+
+            apkUrl ??= 'https://github.com/Bhanu7773-dev/Onyx-Dailer/releases/download/$tag/app-release.apk';
+            final isNewer = isVersionNewer(tag, currentVer);
+
+            final update = UpdateInfo(
+              latestTag: tag,
+              currentVersion: currentVer,
+              releaseTitle: title,
+              releaseNotes: notes,
+              apkDownloadUrl: apkUrl,
+              apkSize: apkSize,
+              publishedAt: publishedAt,
+              isNewer: isNewer,
+            );
+
+            lastCheckedUpdate = update;
+            return update;
           }
         }
-
-        // Fallback: if no explicit asset matching .apk found, check tag release direct link
-        apkUrl ??= 'https://github.com/Bhanu7773-dev/Onyx-Dailer/releases/download/$tag/app-release.apk';
-
-        final isNewer = isVersionNewer(tag, currentVer);
-
-        final update = UpdateInfo(
-          latestTag: tag,
-          currentVersion: currentVer,
-          releaseTitle: title,
-          releaseNotes: notes,
-          apkDownloadUrl: apkUrl,
-          apkSize: apkSize,
-          publishedAt: publishedAt,
-          isNewer: isNewer,
-        );
-
-        lastCheckedUpdate = update;
-        return update;
       } else {
         debugPrint('OtaUpdateService: GitHub returned status code ${response.statusCode}');
       }
@@ -183,9 +218,18 @@ class OtaUpdateService {
 
       final contentLength = response.contentLength;
 
-      // Save to external cache or system temp
-      final tempDir = Directory.systemTemp;
-      final file = File('${tempDir.path}/onyx_dialer_update.apk');
+      // Save to external storage Download folder or app cache
+      File file;
+      final downloadDir = Directory('/storage/emulated/0/Download');
+      if (await downloadDir.exists()) {
+        file = File('${downloadDir.path}/onyx_dialer_update.apk');
+      } else {
+        file = File('${Directory.systemTemp.parent.path}/cache/onyx_dialer_update.apk');
+      }
+
+      if (!await file.parent.exists()) {
+        await file.parent.create(recursive: true);
+      }
       if (await file.exists()) {
         await file.delete();
       }
@@ -317,6 +361,7 @@ class _NothingUpdateDialogState extends State<_NothingUpdateDialog> {
 
     return Dialog(
       backgroundColor: nBg,
+      insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(20),
         side: const BorderSide(color: Color(0xFF2E2E2E), width: 1),
@@ -453,60 +498,81 @@ class _NothingUpdateDialogState extends State<_NothingUpdateDialog> {
 
             const SizedBox(height: 20),
 
-            // Action buttons
-            Row(
-              mainAxisAlignment: MainAxisAlignment.end,
+            // Action buttons (Full-width stacked)
+            Column(
               children: [
-                if (!_isDownloading)
-                  TextButton(
-                    onPressed: () => Navigator.pop(context),
-                    child: Text(
-                      'CANCEL',
-                      style: TextStyle(
-                        fontFamily: _nFont,
-                        color: nSecondary,
-                        letterSpacing: 1.5,
-                        fontSize: 12,
+                if (_downloadedPath != null)
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: nRed,
+                        foregroundColor: nWhite,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        padding: const EdgeInsets.symmetric(vertical: 13),
+                        elevation: 0,
+                      ),
+                      icon: const Icon(Icons.install_mobile_rounded, size: 18),
+                      label: Text(
+                        'INSTALL NOW',
+                        style: TextStyle(
+                          fontFamily: _nFont,
+                          letterSpacing: 1.5,
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      onPressed: _installApk,
+                    ),
+                  )
+                else if (_isDownloading)
+                  const SizedBox.shrink()
+                else
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: nRed,
+                        foregroundColor: nWhite,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        padding: const EdgeInsets.symmetric(vertical: 13),
+                        elevation: 0,
+                      ),
+                      icon: const Icon(Icons.download_rounded, size: 18),
+                      label: Text(
+                        'DOWNLOAD & INSTALL',
+                        style: TextStyle(
+                          fontFamily: _nFont,
+                          letterSpacing: 1.5,
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      onPressed: _startDownload,
+                    ),
+                  ),
+                if (!_isDownloading) ...[
+                  const SizedBox(height: 8),
+                  SizedBox(
+                    width: double.infinity,
+                    child: TextButton(
+                      style: TextButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 10),
+                      ),
+                      onPressed: () => Navigator.pop(context),
+                      child: Text(
+                        'CANCEL',
+                        style: TextStyle(
+                          fontFamily: _nFont,
+                          color: nSecondary,
+                          letterSpacing: 1.5,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
                     ),
                   ),
-                const SizedBox(width: 8),
-                if (_downloadedPath != null)
-                  ElevatedButton.icon(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: nRed,
-                      foregroundColor: nWhite,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                    ),
-                    icon: const Icon(Icons.install_mobile_rounded, size: 18),
-                    label: Text(
-                      'INSTALL NOW',
-                      style: TextStyle(fontFamily: _nFont, letterSpacing: 1.2, fontSize: 12),
-                    ),
-                    onPressed: _installApk,
-                  )
-                else if (_isDownloading)
-                  const SizedBox(
-                    width: 24,
-                    height: 24,
-                    child: CircularProgressIndicator(color: nRed, strokeWidth: 2),
-                  )
-                else
-                  ElevatedButton.icon(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: nRed,
-                      foregroundColor: nWhite,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                    ),
-                    icon: const Icon(Icons.download_rounded, size: 18),
-                    label: Text(
-                      'DOWNLOAD & INSTALL',
-                      style: TextStyle(fontFamily: _nFont, letterSpacing: 1.2, fontSize: 12),
-                    ),
-                    onPressed: _startDownload,
-                  ),
+                ],
               ],
             ),
           ],

@@ -29,7 +29,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _spamProtection = false;
   String _defaultSim = 'ask';
   String _appTheme = 'onyx';
-  String _currentVersion = '1.0.0';
+  String _currentVersion = '1.0.1';
   bool _isCheckingUpdate = false;
   UpdateInfo? _availableUpdate;
   List<Map<String, String>> _simCards = [];

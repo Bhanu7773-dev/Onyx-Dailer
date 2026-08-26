@@ -33,7 +33,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   String _defaultSim = 'ask';
   String _appTheme = 'nothing';
   String _nothingFont = 'dot'; // 'dot' | 'serif'
-  String _currentVersion = '1.0.0';
+  String _currentVersion = '1.0.1';
   bool _isCheckingUpdate = false;
   UpdateInfo? _availableUpdate;
   List<Map<String, String>> _simCards = [];

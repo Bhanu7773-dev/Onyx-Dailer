@@ -148,7 +148,7 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
             const SizedBox(height: 16),
             const Text('Onyx Dialer', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-            const Text('Version 1.0.0', style: TextStyle(color: Colors.grey)),
+            const Text('Version 1.0.1', style: TextStyle(color: Colors.grey)),
             const SizedBox(height: 16),
             const Text(
               'A premium dialer with native root-based\ntwo-sided call recording.',

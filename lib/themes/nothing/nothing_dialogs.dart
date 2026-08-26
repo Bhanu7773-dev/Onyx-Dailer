@@ -255,7 +255,7 @@ class NothingDialogs {
                             ),
                             SizedBox(height: 2),
                             Text(
-                              'Version 1.0.0 (Nothing UI)',
+                              'Version 1.0.1 (Nothing UI)',
                               style: TextStyle(color: _nSecondary, fontSize: 12),
                             ),
                           ],

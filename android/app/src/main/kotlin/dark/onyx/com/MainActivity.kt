@@ -520,11 +520,29 @@ class MainActivity: FlutterActivity() {
                             if (!file.exists()) {
                                 result.error("FILE_NOT_FOUND", "APK file not found at $filePath", null)
                             } else {
-                                val apkUri = FileProvider.getUriForFile(
-                                    this,
-                                    "${packageName}.fileprovider",
-                                    file
-                                )
+                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !packageManager.canRequestPackageInstalls()) {
+                                    try {
+                                        val settingsIntent = Intent(android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES).apply {
+                                            data = Uri.parse("package:$packageName")
+                                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                        }
+                                        startActivity(settingsIntent)
+                                    } catch (e: Exception) {
+                                        android.util.Log.e("OnyxMainActivity", "Unable to open unknown app sources settings: ${e.message}")
+                                    }
+                                }
+
+                                val apkUri = try {
+                                    FileProvider.getUriForFile(
+                                        this,
+                                        "${packageName}.fileprovider",
+                                        file
+                                    )
+                                } catch (e: Exception) {
+                                    android.util.Log.w("OnyxMainActivity", "FileProvider failed, fallback to file URI: ${e.message}")
+                                    Uri.fromFile(file)
+                                }
+
                                 val installIntent = Intent(Intent.ACTION_VIEW).apply {
                                     setDataAndType(apkUri, "application/vnd.android.package-archive")
                                     addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)

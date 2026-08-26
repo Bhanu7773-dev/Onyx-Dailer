@@ -84,7 +84,7 @@ class _RecentsScreenState extends State<RecentsScreen> with WidgetsBindingObserv
             const SizedBox(height: 16),
             const Text('Onyx Dialer',
                 style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: _iosLabel)),
-            const Text('Version 1.0.0', style: TextStyle(color: _iosSecondary)),
+            const Text('Version 1.0.1', style: TextStyle(color: _iosSecondary)),
             const SizedBox(height: 12),
             const Text('A premium dialer with native root-based\ntwo-sided call recording.',
                 style: TextStyle(color: _iosLabel)),
