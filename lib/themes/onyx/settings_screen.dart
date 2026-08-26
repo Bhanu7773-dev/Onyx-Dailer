@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:wavedialer/services/telecom_service.dart';
+import 'package:wavedialer/services/ota_update_service.dart';
 import 'package:wavedialer/logic/theme_controller.dart';
 
 const _iosBlue = Color(0xFF007AFF);
@@ -28,6 +29,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _spamProtection = false;
   String _defaultSim = 'ask';
   String _appTheme = 'onyx';
+  String _currentVersion = '1.0.0';
+  bool _isCheckingUpdate = false;
+  UpdateInfo? _availableUpdate;
   List<Map<String, String>> _simCards = [];
 
   @override
@@ -36,6 +40,62 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _checkRoot();
     _loadPrefs();
     _loadSimCards();
+    _loadVersion();
+    _checkUpdateQuietly();
+  }
+
+  Future<void> _loadVersion() async {
+    final ver = await OtaUpdateService.instance.getCurrentVersion();
+    if (mounted) setState(() => _currentVersion = ver);
+  }
+
+  Future<void> _checkUpdateQuietly() async {
+    final update = await OtaUpdateService.instance.checkForUpdate();
+    if (mounted && update != null) {
+      setState(() => _availableUpdate = update);
+    }
+  }
+
+  Future<void> _checkUpdateManually() async {
+    setState(() => _isCheckingUpdate = true);
+    final update = await OtaUpdateService.instance.checkForUpdate();
+    if (!mounted) return;
+    setState(() {
+      _isCheckingUpdate = false;
+      _availableUpdate = update;
+    });
+
+    if (update != null && update.isNewer) {
+      OtaUpdateService.instance.showUpdateModal(context, update);
+    } else if (update != null) {
+      showCupertinoDialog(
+        context: context,
+        builder: (ctx) => CupertinoAlertDialog(
+          title: const Text('Software Up to Date'),
+          content: Text('\nYour Onyx Dialer is running the latest version ($_currentVersion).'),
+          actions: [
+            CupertinoDialogAction(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('OK'),
+            ),
+          ],
+        ),
+      );
+    } else {
+      showCupertinoDialog(
+        context: context,
+        builder: (ctx) => CupertinoAlertDialog(
+          title: const Text('Update Check Failed'),
+          content: const Text('\nUnable to check for updates. Please verify your internet connection.'),
+          actions: [
+            CupertinoDialogAction(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('OK'),
+            ),
+          ],
+        ),
+      );
+    }
   }
 
   Future<void> _loadSimCards() async {
@@ -306,6 +366,39 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       : _appTheme.toUpperCase(),
               trailing: const Icon(CupertinoIcons.chevron_up_chevron_down, color: _iosSecondary, size: 16),
               onTap: _showThemeSelectionSheet,
+            ),
+          ]),
+
+          // Section 6: Software Updates
+          _buildSectionHeader('SOFTWARE UPDATES'),
+          _buildSettingCard([
+            _buildListTile(
+              title: 'Check for Updates',
+              subtitle: _isCheckingUpdate
+                  ? 'Checking GitHub releases...'
+                  : (_availableUpdate != null && _availableUpdate!.isNewer
+                      ? 'Update ${_availableUpdate!.latestTag} available'
+                      : 'Version $_currentVersion (Up to date)'),
+              trailing: _isCheckingUpdate
+                  ? const CupertinoActivityIndicator()
+                  : (_availableUpdate != null && _availableUpdate!.isNewer
+                      ? Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: _iosBlue,
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: const Text(
+                            'UPDATE',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        )
+                      : const Icon(CupertinoIcons.arrow_clockwise, color: _iosSecondary, size: 18)),
+              onTap: _isCheckingUpdate ? null : _checkUpdateManually,
             ),
           ]),
           const SizedBox(height: 40),

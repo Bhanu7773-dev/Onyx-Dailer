@@ -21,6 +21,8 @@ import rikka.shizuku.Shizuku
 import android.content.ServiceConnection
 import android.os.IBinder
 import android.content.ComponentName
+import androidx.core.content.FileProvider
+import java.io.File
 import dark.onyx.com.BuildConfig
 
 class MainActivity: FlutterActivity() {
@@ -486,6 +488,56 @@ class MainActivity: FlutterActivity() {
                 }
                 "isShizukuServiceRunning" -> {
                     result.success(callRecorderService != null)
+                }
+                "getAppVersion" -> {
+                    try {
+                        val pInfo = packageManager.getPackageInfo(packageName, 0)
+                        val versionName = pInfo.versionName ?: "1.0.0"
+                        val versionCode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                            pInfo.longVersionCode
+                        } else {
+                            @Suppress("DEPRECATION")
+                            pInfo.versionCode.toLong()
+                        }
+                        result.success(mapOf(
+                            "versionName" to versionName,
+                            "versionCode" to versionCode
+                        ))
+                    } catch (e: Exception) {
+                        result.success(mapOf(
+                            "versionName" to "1.0.0",
+                            "versionCode" to 1L
+                        ))
+                    }
+                }
+                "installApk" -> {
+                    val filePath = call.argument<String>("filePath")
+                    if (filePath.isNullOrEmpty()) {
+                        result.error("INVALID_PATH", "File path is null or empty", null)
+                    } else {
+                        try {
+                            val file = File(filePath)
+                            if (!file.exists()) {
+                                result.error("FILE_NOT_FOUND", "APK file not found at $filePath", null)
+                            } else {
+                                val apkUri = FileProvider.getUriForFile(
+                                    this,
+                                    "${packageName}.fileprovider",
+                                    file
+                                )
+                                val installIntent = Intent(Intent.ACTION_VIEW).apply {
+                                    setDataAndType(apkUri, "application/vnd.android.package-archive")
+                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                }
+                                startActivity(installIntent)
+                                result.success(true)
+                            }
+                        } catch (e: Exception) {
+                            android.util.Log.e("OnyxMainActivity", "Error launching APK install: ${e.message}")
+                            result.error("INSTALL_ERROR", e.message, null)
+                        }
+                    }
                 }
                 else -> result.notImplemented()
             }

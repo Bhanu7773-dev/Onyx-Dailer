@@ -5,10 +5,10 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:wavedialer/services/telecom_service.dart';
+import 'package:wavedialer/services/ota_update_service.dart';
 import 'package:wavedialer/logic/theme_controller.dart';
-import 'package:wavedialer/logic/theme_controller.dart' as tc;
 
-String get _nFont => tc.ThemeController.instance.nothingFontFamily;
+String get _nFont => ThemeController.instance.nothingFontFamily;
 
 // Nothing UI Colors
 const _bg = Color(0xFF000000);
@@ -33,6 +33,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
   String _defaultSim = 'ask';
   String _appTheme = 'nothing';
   String _nothingFont = 'dot'; // 'dot' | 'serif'
+  String _currentVersion = '1.0.0';
+  bool _isCheckingUpdate = false;
+  UpdateInfo? _availableUpdate;
   List<Map<String, String>> _simCards = [];
 
   @override
@@ -41,6 +44,70 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _checkRoot();
     _loadPrefs();
     _loadSimCards();
+    _loadVersion();
+    _checkUpdateQuietly();
+  }
+
+  Future<void> _loadVersion() async {
+    final ver = await OtaUpdateService.instance.getCurrentVersion();
+    if (mounted) setState(() => _currentVersion = ver);
+  }
+
+  Future<void> _checkUpdateQuietly() async {
+    final update = await OtaUpdateService.instance.checkForUpdate();
+    if (mounted && update != null) {
+      setState(() => _availableUpdate = update);
+    }
+  }
+
+  Future<void> _checkUpdateManually() async {
+    HapticFeedback.selectionClick();
+    setState(() => _isCheckingUpdate = true);
+    final update = await OtaUpdateService.instance.checkForUpdate();
+    if (!mounted) return;
+    setState(() {
+      _isCheckingUpdate = false;
+      _availableUpdate = update;
+    });
+
+    if (update != null && update.isNewer) {
+      OtaUpdateService.instance.showUpdateModal(context, update);
+    } else if (update != null) {
+      showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: const Color(0xFF141414),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+            side: const BorderSide(color: Color(0xFF2E2E2E)),
+          ),
+          title: Text(
+            'SYSTEM UP TO DATE',
+            style: TextStyle(fontFamily: _nFont, color: Colors.white, fontSize: 13, letterSpacing: 1.5, fontWeight: FontWeight.bold),
+          ),
+          content: Text(
+            'You are running the latest version (${update.currentVersion}).',
+            style: const TextStyle(color: Color(0xFF888888), fontSize: 13),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: Text('OK', style: TextStyle(fontFamily: _nFont, color: _nRed, letterSpacing: 1.2, fontWeight: FontWeight.bold)),
+            ),
+          ],
+        ),
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          backgroundColor: const Color(0xFF1C1C1E),
+          content: Text(
+            'Unable to check for updates. Check internet connection.',
+            style: TextStyle(fontFamily: _nFont, color: Colors.white, fontSize: 12),
+          ),
+        ),
+      );
+    }
   }
 
   Future<void> _loadSimCards() async {
@@ -501,6 +568,44 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       subtitle: 'Keep screen active during calls near ear',
                       value: _blockProximity,
                       onChanged: _toggleBlockProximity,
+                    ),
+                  ]),
+
+                  // Section 6: OTA & Software Updates
+                  _buildSectionHeader('SOFTWARE UPDATES'),
+                  _buildSettingCard([
+                    _buildListTile(
+                      title: 'CHECK FOR UPDATES',
+                      subtitle: _isCheckingUpdate
+                          ? 'Checking GitHub releases...'
+                          : (_availableUpdate != null && _availableUpdate!.isNewer
+                              ? 'Update ${_availableUpdate!.latestTag} available'
+                              : 'Current version: v$_currentVersion (Up to date)'),
+                      trailing: _isCheckingUpdate
+                          ? const SizedBox(
+                              width: 18, height: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2, color: _nRed),
+                            )
+                          : (_availableUpdate != null && _availableUpdate!.isNewer
+                              ? Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                  decoration: BoxDecoration(
+                                    color: _nRed,
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: Text(
+                                    'UPDATE',
+                                    style: TextStyle(
+                                      color: Colors.white,
+                                      fontFamily: _nFont,
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.bold,
+                                      letterSpacing: 1.2,
+                                    ),
+                                  ),
+                                )
+                              : const Icon(Icons.refresh_rounded, color: _nSecondary, size: 20)),
+                      onTap: _isCheckingUpdate ? null : _checkUpdateManually,
                     ),
                   ]),
                 ],
