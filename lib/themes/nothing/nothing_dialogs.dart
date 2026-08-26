@@ -6,6 +6,9 @@ import 'package:flutter_contacts/flutter_contacts.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:wavedialer/themes/nothing/settings_screen.dart';
 import 'package:wavedialer/logic/profile_service.dart';
+import 'package:wavedialer/logic/theme_controller.dart' as tc;
+
+String get _nFont => tc.ThemeController.instance.nothingFontFamily;
 
 const _nBg = Color(0xFF141414);
 const _nCard = Color(0xFF1E1E1E);
@@ -50,12 +53,12 @@ class NothingDialogs {
                 children: [
                   Text(
                     title.toUpperCase(),
-                    style: const TextStyle(
+                    style: TextStyle(
                       color: _nLabel,
                       fontSize: 16,
                       fontWeight: FontWeight.bold,
                       letterSpacing: 2,
-                      fontFamily: 'NothingFont',
+                      fontFamily: _nFont,
                     ),
                   ),
                   const SizedBox(height: 12),
@@ -79,8 +82,8 @@ class NothingDialogs {
                         ),
                         child: Text(
                           cancelLabel,
-                          style: const TextStyle(
-                            fontFamily: 'NothingFont',
+                          style: TextStyle(
+                            fontFamily: _nFont,
                             letterSpacing: 1.5,
                             fontWeight: FontWeight.w600,
                           ),
@@ -97,8 +100,8 @@ class NothingDialogs {
                         ),
                         child: Text(
                           confirmLabel,
-                          style: const TextStyle(
-                            fontFamily: 'NothingFont',
+                          style: TextStyle(
+                            fontFamily: _nFont,
                             letterSpacing: 1.5,
                             fontWeight: FontWeight.bold,
                           ),
@@ -123,14 +126,14 @@ class NothingDialogs {
       builder: (ctx) => BackdropFilter(
         filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
         child: CupertinoActionSheet(
-          title: const Text(
+          title: Text(
             'ONYX & NOTHING DIALER',
             style: TextStyle(
               color: _nLabel,
               fontWeight: FontWeight.bold,
               letterSpacing: 1.5,
               fontSize: 16,
-              fontFamily: 'NothingFont',
+              fontFamily: _nFont,
             ),
           ),
           message: const Text(
@@ -146,12 +149,12 @@ class NothingDialogs {
                   MaterialPageRoute(builder: (_) => const SettingsScreen()),
                 );
               },
-              child: const Row(
+              child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   Icon(Icons.settings_outlined, color: _nLabel, size: 20),
                   SizedBox(width: 10),
-                  Text('Settings', style: TextStyle(color: _nLabel, fontFamily: 'NothingFont', letterSpacing: 1)),
+                  Text('Settings', style: TextStyle(color: _nLabel, fontFamily: _nFont, letterSpacing: 1)),
                 ],
               ),
             ),
@@ -160,12 +163,12 @@ class NothingDialogs {
                 Navigator.pop(ctx);
                 showAboutDialog(context);
               },
-              child: const Row(
+              child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   Icon(Icons.info_outline_rounded, color: _nLabel, size: 20),
                   SizedBox(width: 10),
-                  Text('About Onyx Dialer', style: TextStyle(color: _nLabel, fontFamily: 'NothingFont', letterSpacing: 1)),
+                  Text('About Onyx Dialer', style: TextStyle(color: _nLabel, fontFamily: _nFont, letterSpacing: 1)),
                 ],
               ),
             ),
@@ -177,12 +180,12 @@ class NothingDialogs {
                   onAvatarChanged?.call();
                 }
               },
-              child: const Row(
+              child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   Icon(Icons.photo_library_outlined, color: _nLabel, size: 20),
                   SizedBox(width: 10),
-                  Text('Choose from Gallery', style: TextStyle(color: _nLabel, fontFamily: 'NothingFont', letterSpacing: 1)),
+                  Text('Choose from Gallery', style: TextStyle(color: _nLabel, fontFamily: _nFont, letterSpacing: 1)),
                 ],
               ),
             ),
@@ -190,7 +193,7 @@ class NothingDialogs {
           cancelButton: CupertinoActionSheetAction(
             isDefaultAction: true,
             onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel', style: TextStyle(color: _nSecondary, fontFamily: 'NothingFont')),
+            child: Text('Cancel', style: TextStyle(color: _nSecondary, fontFamily: _nFont)),
           ),
         ),
       ),
@@ -236,7 +239,7 @@ class NothingDialogs {
                         child: const Icon(Icons.call, color: _nRed, size: 24),
                       ),
                       const SizedBox(width: 14),
-                      const Expanded(
+                      Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
@@ -247,7 +250,7 @@ class NothingDialogs {
                                 fontSize: 16,
                                 fontWeight: FontWeight.bold,
                                 letterSpacing: 2,
-                                fontFamily: 'NothingFont',
+                                fontFamily: _nFont,
                               ),
                             ),
                             SizedBox(height: 2),
@@ -268,14 +271,14 @@ class NothingDialogs {
                   const SizedBox(height: 16),
                   const Divider(color: _nDivider, height: 1),
                   const SizedBox(height: 16),
-                  const Text(
+                  Text(
                     'DEVELOPER',
                     style: TextStyle(
                       color: _nSecondary,
                       fontSize: 11,
                       fontWeight: FontWeight.bold,
                       letterSpacing: 1.5,
-                      fontFamily: 'NothingFont',
+                      fontFamily: _nFont,
                     ),
                   ),
                   const SizedBox(height: 4),
@@ -292,7 +295,7 @@ class NothingDialogs {
                         mode: LaunchMode.externalApplication,
                       ),
                       icon: const Icon(Icons.send, size: 16),
-                      label: const Text('JOIN TELEGRAM CHANNEL', style: TextStyle(fontFamily: 'NothingFont', letterSpacing: 1.2, fontSize: 12)),
+                      label: Text('JOIN TELEGRAM CHANNEL', style: TextStyle(fontFamily: _nFont, letterSpacing: 1.2, fontSize: 12)),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: const Color(0xFF0088CC),
                         foregroundColor: Colors.white,
@@ -306,7 +309,7 @@ class NothingDialogs {
                     alignment: Alignment.centerRight,
                     child: TextButton(
                       onPressed: () => Navigator.pop(ctx),
-                      child: const Text('CLOSE', style: TextStyle(color: _nSecondary, fontFamily: 'NothingFont', letterSpacing: 1.5)),
+                      child: Text('CLOSE', style: TextStyle(color: _nSecondary, fontFamily: _nFont, letterSpacing: 1.5)),
                     ),
                   ),
                 ],
@@ -346,14 +349,14 @@ class NothingDialogs {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
+                  Text(
                     'NEW CONTACT',
                     style: TextStyle(
                       color: _nLabel,
                       fontSize: 16,
                       fontWeight: FontWeight.bold,
                       letterSpacing: 2,
-                      fontFamily: 'NothingFont',
+                      fontFamily: _nFont,
                     ),
                   ),
                   const SizedBox(height: 18),
@@ -366,7 +369,7 @@ class NothingDialogs {
                     children: [
                       TextButton(
                         onPressed: () => Navigator.pop(ctx, false),
-                        child: const Text('CANCEL', style: TextStyle(color: _nSecondary, fontFamily: 'NothingFont', letterSpacing: 1.5)),
+                        child: Text('CANCEL', style: TextStyle(color: _nSecondary, fontFamily: _nFont, letterSpacing: 1.5)),
                       ),
                       const SizedBox(width: 8),
                       ElevatedButton(
@@ -381,7 +384,7 @@ class NothingDialogs {
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
                         ),
-                        child: const Text('SAVE', style: TextStyle(fontFamily: 'NothingFont', letterSpacing: 1.5, fontWeight: FontWeight.bold)),
+                        child: Text('SAVE', style: TextStyle(fontFamily: _nFont, letterSpacing: 1.5, fontWeight: FontWeight.bold)),
                       ),
                     ],
                   ),
@@ -443,14 +446,14 @@ class NothingDialogs {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
+                  Text(
                     'EDIT CONTACT',
                     style: TextStyle(
                       color: _nLabel,
                       fontSize: 16,
                       fontWeight: FontWeight.bold,
                       letterSpacing: 2,
-                      fontFamily: 'NothingFont',
+                      fontFamily: _nFont,
                     ),
                   ),
                   const SizedBox(height: 18),
@@ -463,7 +466,7 @@ class NothingDialogs {
                     children: [
                       TextButton(
                         onPressed: () => Navigator.pop(ctx, false),
-                        child: const Text('CANCEL', style: TextStyle(color: _nSecondary, fontFamily: 'NothingFont', letterSpacing: 1.5)),
+                        child: Text('CANCEL', style: TextStyle(color: _nSecondary, fontFamily: _nFont, letterSpacing: 1.5)),
                       ),
                       const SizedBox(width: 8),
                       ElevatedButton(
@@ -474,7 +477,7 @@ class NothingDialogs {
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
                         ),
-                        child: const Text('SAVE', style: TextStyle(fontFamily: 'NothingFont', letterSpacing: 1.5, fontWeight: FontWeight.bold)),
+                        child: Text('SAVE', style: TextStyle(fontFamily: _nFont, letterSpacing: 1.5, fontWeight: FontWeight.bold)),
                       ),
                     ],
                   ),
@@ -512,10 +515,10 @@ class NothingDialogs {
         controller: controller,
         keyboardType: type,
         cursorColor: _nRed,
-        style: const TextStyle(color: _nLabel, fontSize: 15, fontFamily: 'NothingFont'),
+        style: TextStyle(color: _nLabel, fontSize: 15, fontFamily: _nFont),
         decoration: InputDecoration(
           labelText: label,
-          labelStyle: const TextStyle(color: _nSecondary, fontSize: 12, letterSpacing: 1.5, fontFamily: 'NothingFont'),
+          labelStyle: TextStyle(color: _nSecondary, fontSize: 12, letterSpacing: 1.5, fontFamily: _nFont),
           border: InputBorder.none,
           isDense: true,
         ),

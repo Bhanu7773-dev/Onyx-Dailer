@@ -7,6 +7,9 @@ import 'package:wavedialer/themes/nothing/contacts_screen.dart';
 import 'package:wavedialer/themes/nothing/recents_screen.dart';
 import 'package:wavedialer/themes/nothing/recordings_screen.dart';
 import 'package:wavedialer/services/telecom_service.dart';
+import 'package:wavedialer/logic/theme_controller.dart' as tc;
+
+String get _nFont => tc.ThemeController.instance.nothingFontFamily;
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -175,7 +178,7 @@ class _NothingTabBar extends StatelessWidget {
                           fontSize: 10,
                           fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
                           letterSpacing: 1.2,
-                          fontFamily: 'NothingFont',
+                          fontFamily: _nFont,
                           color: isSelected ? const Color(0xFFE5162A) : const Color(0xFF7E7E7E),
                         ),
                       ),

@@ -364,7 +364,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       title: Text(title, style: const TextStyle(color: _iosLabel, fontSize: 16)),
       subtitle: Text(subtitle, style: const TextStyle(color: _iosSecondary, fontSize: 12)),
       value: value,
-      activeColor: _iosBlue,
+      activeThumbColor: _iosBlue,
       onChanged: onChanged,
     );
   }

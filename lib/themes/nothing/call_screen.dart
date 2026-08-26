@@ -9,6 +9,8 @@ import 'package:wavedialer/logic/call_controller.dart';
 import 'package:wavedialer/services/telecom_service.dart';
 import 'package:wavedialer/themes/onyx/dialpad_screen.dart';
 
+import 'package:wavedialer/logic/theme_controller.dart' as tc;
+
 // ── Nothing Phone palette ──────────────────────────────────────────────────
 const _nBg       = Color(0xFF0D0D0D);
 const _nCard     = Color(0xFF1A1A1A);
@@ -19,8 +21,8 @@ const _nGreen    = Color(0xFF30D158);
 const _nLabel    = Color(0xFF9E9E9E);
 const _nWhite    = Color(0xFFFFFFFF);
 
-// ── Nothing dot-matrix font name ───────────────────────────────────────────
-const _nFont = 'NothingFont';
+// ── Nothing font name ──────────────────────────────────────────────────────
+String get _nFont => tc.ThemeController.instance.nothingFontFamily;
 
 class CallScreen extends StatefulWidget {
   final String? initialNumber;
@@ -81,8 +83,10 @@ class _CallScreenState extends State<CallScreen>
     );
     _c.addListener(_onControllerChange);
 
-    // If we launched straight into active (answered from notification), skip animation
-    if (widget.initialState == 4) {
+    // For outgoing calls (Dialing/Connecting) or already Active — show immediately, no animation
+    if (widget.initialState == 4 ||
+        widget.initialState == 1 ||
+        widget.initialState == 9) {
       _heroCtrl.value = 1.0;
       _wasActive = true;
       _rippleCtrl.stop();
@@ -114,8 +118,7 @@ class _CallScreenState extends State<CallScreen>
     // Handle call end
     if (_c.callState == 7) {
       ProximitySensor.setProximityScreenOff(false);
-      if (_exitTimer == null) {
-        _exitTimer = Timer(Duration(seconds: widget.exitOnEnd ? 1 : 2), () {
+      _exitTimer ??= Timer(Duration(seconds: widget.exitOnEnd ? 1 : 2), () {
           if (mounted) {
             ProximitySensor.setProximityScreenOff(false);
             if (widget.exitOnEnd) {
@@ -125,7 +128,6 @@ class _CallScreenState extends State<CallScreen>
             }
           }
         });
-      }
     }
   }
 
@@ -231,7 +233,7 @@ class _CallScreenState extends State<CallScreen>
                 textAlign: TextAlign.center,
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
+                style: TextStyle(
                   fontFamily: _nFont,
                   fontSize: 34,
                   color: _nWhite,
@@ -248,7 +250,7 @@ class _CallScreenState extends State<CallScreen>
                 ),
                 child: Text(
                   isSpam ? 'SPAM DETECTED' : 'is calling...',
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontFamily: _nFont,
                     fontSize: 12,
                     color: _nWhite,
@@ -285,7 +287,7 @@ class _CallScreenState extends State<CallScreen>
                     ),
                   ),
                   const SizedBox(height: 10),
-                  const Text('Decline', style: TextStyle(color: _nLabel, fontSize: 13, fontFamily: _nFont, letterSpacing: 1)),
+                  Text('Decline', style: TextStyle(color: _nLabel, fontSize: 13, fontFamily: _nFont, letterSpacing: 1)),
                 ],
               ),
               // Answer — plain button, no ripple
@@ -305,7 +307,7 @@ class _CallScreenState extends State<CallScreen>
                     ),
                   ),
                   const SizedBox(height: 10),
-                  const Text('Answer', style: TextStyle(color: _nLabel, fontSize: 13, fontFamily: _nFont, letterSpacing: 1)),
+                  Text('Answer', style: TextStyle(color: _nLabel, fontSize: 13, fontFamily: _nFont, letterSpacing: 1)),
                 ],
               ),
             ],
@@ -339,7 +341,7 @@ class _CallScreenState extends State<CallScreen>
                       (_c.name ?? _c.number).toUpperCase(),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontFamily: _nFont,
                         fontSize: 20,
                         color: _nWhite,
@@ -450,7 +452,7 @@ class _CallScreenState extends State<CallScreen>
             ),
           ),
           const SizedBox(height: 8),
-          Text(b.label, style: const TextStyle(color: _nLabel, fontSize: 12, fontFamily: _nFont, letterSpacing: 1)),
+          Text(b.label, style: TextStyle(color: _nLabel, fontSize: 12, fontFamily: _nFont, letterSpacing: 1)),
         ],
       ),
     );
@@ -470,7 +472,7 @@ class _CallScreenState extends State<CallScreen>
           padding: const EdgeInsets.symmetric(horizontal: 32),
           child: Text(
             _c.dtmfInput.isEmpty ? ' ' : _c.dtmfInput,
-            style: const TextStyle(fontSize: 28, color: _nWhite, fontFamily: _nFont, letterSpacing: 3),
+            style: TextStyle(fontSize: 28, color: _nWhite, fontFamily: _nFont, letterSpacing: 3),
             maxLines: 1, overflow: TextOverflow.ellipsis,
           ),
         ),
@@ -490,8 +492,8 @@ class _CallScreenState extends State<CallScreen>
                       width: 68, height: 68,
                       decoration: const BoxDecoration(color: _nButton, shape: BoxShape.circle),
                       child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-                        Text(d[0], style: const TextStyle(fontSize: 26, color: _nWhite, fontFamily: _nFont)),
-                        if (d[1].isNotEmpty) Text(d[1], style: const TextStyle(fontSize: 9, color: _nLabel, fontFamily: _nFont, letterSpacing: 2)),
+                        Text(d[0], style: TextStyle(fontSize: 26, color: _nWhite, fontFamily: _nFont)),
+                        if (d[1].isNotEmpty) Text(d[1], style: TextStyle(fontSize: 9, color: _nLabel, fontFamily: _nFont, letterSpacing: 2)),
                       ]),
                     ),
                   );
@@ -502,7 +504,7 @@ class _CallScreenState extends State<CallScreen>
         ),
         GestureDetector(
           onTap: _c.toggleKeypad,
-          child: const Padding(
+          child: Padding(
             padding: EdgeInsets.symmetric(vertical: 4),
             child: Text('Hide', style: TextStyle(color: _nLabel, fontSize: 16, fontFamily: _nFont, letterSpacing: 1)),
           ),
@@ -531,7 +533,7 @@ class _CallScreenState extends State<CallScreen>
                 decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2))),
               ListTile(
                 leading: const Icon(Icons.dialpad_rounded, color: _nWhite),
-                title: const Text('Dial a number', style: TextStyle(color: _nWhite, fontFamily: _nFont)),
+                title: Text('Dial a number', style: TextStyle(color: _nWhite, fontFamily: _nFont)),
                 onTap: () {
                   Navigator.pop(ctx);
                   Navigator.push(context, MaterialPageRoute(builder: (_) => const DialpadScreen()));
@@ -539,7 +541,7 @@ class _CallScreenState extends State<CallScreen>
               ),
               ListTile(
                 leading: const Icon(Icons.contacts_rounded, color: _nWhite),
-                title: const Text('Choose from contacts', style: TextStyle(color: _nWhite, fontFamily: _nFont)),
+                title: Text('Choose from contacts', style: TextStyle(color: _nWhite, fontFamily: _nFont)),
                 onTap: () {
                   Navigator.pop(ctx);
                   Navigator.push(context, MaterialPageRoute(
@@ -624,10 +626,10 @@ class _CallScreenState extends State<CallScreen>
           const SizedBox(height: 24),
           Text(
             (_c.name ?? _c.number).toUpperCase(),
-            style: const TextStyle(fontFamily: _nFont, fontSize: 22, color: _nWhite, letterSpacing: 2),
+            style: TextStyle(fontFamily: _nFont, fontSize: 22, color: _nWhite, letterSpacing: 2),
           ),
           const SizedBox(height: 12),
-          const Text('CALL ENDED', style: TextStyle(fontFamily: _nFont, fontSize: 14, color: _nLabel, letterSpacing: 3)),
+          Text('CALL ENDED', style: TextStyle(fontFamily: _nFont, fontSize: 14, color: _nLabel, letterSpacing: 3)),
         ],
       ),
     );
@@ -780,11 +782,13 @@ class _AddCallContactPickerState extends State<_AddCallContactPicker> {
     if (await Permission.contacts.isGranted) {
       final all = await FlutterContacts.getAll(properties: {ContactProperty.phone});
       all.sort((a, b) => (a.displayName ?? '').compareTo(b.displayName ?? ''));
-      if (mounted) setState(() {
+      if (mounted) {
+        setState(() {
         _contacts = all.where((c) => c.phones.isNotEmpty).toList();
         _filtered  = _contacts;
         _loading   = false;
       });
+      }
     } else {
       if (mounted) setState(() => _loading = false);
     }
@@ -807,7 +811,7 @@ class _AddCallContactPickerState extends State<_AddCallContactPicker> {
       backgroundColor: _nBg,
       appBar: AppBar(
         backgroundColor: _nCard,
-        title: const Text('SELECT CONTACT', style: TextStyle(color: _nWhite, fontFamily: _nFont, letterSpacing: 2, fontSize: 16)),
+        title: Text('SELECT CONTACT', style: TextStyle(color: _nWhite, fontFamily: _nFont, letterSpacing: 2, fontSize: 16)),
         iconTheme: const IconThemeData(color: _nWhite),
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(50),
@@ -816,10 +820,10 @@ class _AddCallContactPickerState extends State<_AddCallContactPicker> {
             child: TextField(
               controller: _search,
               onChanged: _filter,
-              style: const TextStyle(color: _nWhite, fontFamily: _nFont),
+              style: TextStyle(color: _nWhite, fontFamily: _nFont),
               decoration: InputDecoration(
                 hintText: 'Search',
-                hintStyle: const TextStyle(color: _nLabel, fontFamily: _nFont),
+                hintStyle: TextStyle(color: _nLabel, fontFamily: _nFont),
                 prefixIcon: const Icon(Icons.search, color: _nLabel),
                 filled: true,
                 fillColor: const Color(0xFF2A2A2A),
@@ -833,7 +837,7 @@ class _AddCallContactPickerState extends State<_AddCallContactPicker> {
       body: _loading
           ? const Center(child: CircularProgressIndicator(color: _nWhite))
           : _filtered.isEmpty
-              ? const Center(child: Text('No contacts', style: TextStyle(color: _nLabel, fontFamily: _nFont)))
+              ? Center(child: Text('No contacts', style: TextStyle(color: _nLabel, fontFamily: _nFont)))
               : ListView.builder(
                   itemCount: _filtered.length,
                   itemBuilder: (ctx, i) {
@@ -843,10 +847,10 @@ class _AddCallContactPickerState extends State<_AddCallContactPicker> {
                     return ListTile(
                       leading: CircleAvatar(
                         backgroundColor: const Color(0xFF2C2C2C),
-                        child: Text(dn[0].toUpperCase(), style: const TextStyle(color: _nWhite, fontFamily: _nFont)),
+                        child: Text(dn[0].toUpperCase(), style: TextStyle(color: _nWhite, fontFamily: _nFont)),
                       ),
-                      title: Text(dn, style: const TextStyle(color: _nWhite, fontFamily: _nFont)),
-                      subtitle: Text(num, style: const TextStyle(color: _nLabel, fontSize: 13, fontFamily: _nFont)),
+                      title: Text(dn, style: TextStyle(color: _nWhite, fontFamily: _nFont)),
+                      subtitle: Text(num, style: TextStyle(color: _nLabel, fontSize: 13, fontFamily: _nFont)),
                       trailing: const Icon(Icons.call_rounded, color: _nGreen, size: 22),
                       onTap: () {
                         Navigator.pop(context);

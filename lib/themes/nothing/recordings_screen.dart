@@ -1,10 +1,12 @@
-import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:wavedialer/logic/recordings_controller.dart';
 import 'package:wavedialer/logic/profile_service.dart';
 import 'package:wavedialer/themes/nothing/nothing_dialogs.dart';
+import 'package:wavedialer/logic/theme_controller.dart' as tc;
+
+String get _nFont => tc.ThemeController.instance.nothingFontFamily;
 
 // Nothing UI Colors
 const _bg = Color(0xFF000000);
@@ -108,14 +110,14 @@ class _RecordingsScreenState extends State<RecordingsScreen> with WidgetsBinding
                     constraints: const BoxConstraints(),
                   ),
                   const SizedBox(width: 14),
-                  const Text(
+                  Text(
                     'RECORDINGS',
                     style: TextStyle(
                       fontSize: 22,
                       fontWeight: FontWeight.w800,
                       color: _nLabel,
                       letterSpacing: 3.5,
-                      fontFamily: 'NothingFont',
+                      fontFamily: _nFont,
                     ),
                   ),
                   const Spacer(),
@@ -161,16 +163,16 @@ class _RecordingsScreenState extends State<RecordingsScreen> with WidgetsBinding
                         controller: _searchCtrl,
                         focusNode: _searchFocus,
                         onChanged: (v) => _controller.rebuild(v),
-                        style: const TextStyle(color: _nLabel, fontSize: 15, letterSpacing: 1, fontFamily: 'NothingFont'),
+                        style: TextStyle(color: _nLabel, fontSize: 15, letterSpacing: 1, fontFamily: _nFont),
                         cursorColor: _nRed,
-                        decoration: const InputDecoration(
+                        decoration: InputDecoration(
                           hintText: 'SEARCH RECORDINGS',
                           hintStyle: TextStyle(
                             color: _nSecondary,
                             fontSize: 13,
                             fontWeight: FontWeight.w600,
                             letterSpacing: 1.5,
-                            fontFamily: 'NothingFont',
+                            fontFamily: _nFont,
                           ),
                           border: InputBorder.none,
                           isDense: true,
@@ -199,14 +201,14 @@ class _RecordingsScreenState extends State<RecordingsScreen> with WidgetsBinding
               padding: const EdgeInsets.fromLTRB(20, 8, 20, 8),
               child: Row(
                 children: [
-                  const Text(
+                  Text(
                     'CALL LOG AUDIO',
                     style: TextStyle(
                       color: _nSecondary,
                       fontSize: 12,
                       fontWeight: FontWeight.bold,
                       letterSpacing: 1.5,
-                      fontFamily: 'NothingFont',
+                      fontFamily: _nFont,
                     ),
                   ),
                   const Spacer(),
@@ -219,11 +221,11 @@ class _RecordingsScreenState extends State<RecordingsScreen> with WidgetsBinding
                     ),
                     child: Text(
                       'Total: $count',
-                      style: const TextStyle(
+                      style: TextStyle(
                         color: _nSecondary,
                         fontSize: 12,
                         fontWeight: FontWeight.w600,
-                        fontFamily: 'NothingFont',
+                        fontFamily: _nFont,
                       ),
                     ),
                   ),
@@ -236,7 +238,7 @@ class _RecordingsScreenState extends State<RecordingsScreen> with WidgetsBinding
               child: _controller.isLoading
                   ? const Center(child: CircularProgressIndicator(color: _nRed, strokeWidth: 2))
                   : _controller.allRecordings.isEmpty
-                      ? const Center(
+                      ? Center(
                           child: Column(
                             mainAxisSize: MainAxisSize.min,
                             children: [
@@ -249,7 +251,7 @@ class _RecordingsScreenState extends State<RecordingsScreen> with WidgetsBinding
                                   fontSize: 14,
                                   fontWeight: FontWeight.bold,
                                   letterSpacing: 2,
-                                  fontFamily: 'NothingFont',
+                                  fontFamily: _nFont,
                                 ),
                               ),
                             ],
@@ -333,7 +335,7 @@ class _RecordingsScreenState extends State<RecordingsScreen> with WidgetsBinding
                           color: isPlayingThis ? _nRed : _nLabel,
                           fontSize: 16,
                           fontWeight: FontWeight.bold,
-                          fontFamily: 'NothingFont',
+                          fontFamily: _nFont,
                         ),
                       ),
                     ),
@@ -352,16 +354,16 @@ class _RecordingsScreenState extends State<RecordingsScreen> with WidgetsBinding
                             fontSize: 14,
                             fontWeight: FontWeight.w600,
                             letterSpacing: 1.2,
-                            fontFamily: 'NothingFont',
+                            fontFamily: _nFont,
                           ),
                         ),
                         const SizedBox(height: 3),
                         Text(
                           '$dateStr • ${fileSizeMb}MB',
-                          style: const TextStyle(
+                          style: TextStyle(
                             color: _nSecondary,
                             fontSize: 11,
-                            fontFamily: 'NothingFont',
+                            fontFamily: _nFont,
                           ),
                         ),
                       ],
@@ -406,13 +408,13 @@ class _RecordingsScreenState extends State<RecordingsScreen> with WidgetsBinding
                       children: [
                         Text(
                           isPlayingThis ? _controller.formatDuration(_controller.position) : '00:00',
-                          style: const TextStyle(color: _nSecondary, fontSize: 11, fontFamily: 'NothingFont'),
+                          style: TextStyle(color: _nSecondary, fontSize: 11, fontFamily: _nFont),
                         ),
                         Text(
                           isPlayingThis
                               ? '-${_controller.formatDuration(_controller.duration - _controller.position)}'
                               : (item.duration != null ? _controller.formatDuration(item.duration!) : '--:--'),
-                          style: const TextStyle(color: _nSecondary, fontSize: 11, fontFamily: 'NothingFont'),
+                          style: TextStyle(color: _nSecondary, fontSize: 11, fontFamily: _nFont),
                         ),
                       ],
                     ),

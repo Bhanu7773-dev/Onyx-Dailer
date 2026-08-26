@@ -2,6 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_contacts/flutter_contacts.dart';
 import 'package:wavedialer/logic/dialpad_controller.dart';
+import 'package:wavedialer/themes/nothing/call_screen.dart' as nothing_call;
+import 'package:wavedialer/logic/theme_controller.dart' as tc;
+
+String get _nFont => tc.ThemeController.instance.nothingFontFamily;
 
 // Nothing Phone UI palette
 const _bg          = Color(0xFF000000);
@@ -99,12 +103,12 @@ class _DialpadScreenState extends State<DialpadScreen> {
                         textAlign: TextAlign.center,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 36,
                           fontWeight: FontWeight.w300,
                           color: _nLabel,
                           letterSpacing: 4,
-                          fontFamily: 'NothingFont',
+                          fontFamily: _nFont,
                         ),
                       ),
                     ),
@@ -176,7 +180,22 @@ class _DialpadScreenState extends State<DialpadScreen> {
                       onTap: () => Navigator.pop(context, 1),
                     ),
                     // White call button (Nothing style)
-                    _NothingCallButton(onTap: () => _controller.call(context)),
+                    _NothingCallButton(onTap: () async {
+                      final number = _controller.number;
+                      if (number.isEmpty) return;
+                      await _controller.call(context);
+                      if (!context.mounted) return;
+                      Navigator.pushReplacement(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => nothing_call.CallScreen(
+                            initialNumber: number,
+                            initialState: 1, // Dialing
+                            exitOnEnd: false,
+                          ),
+                        ),
+                      );
+                    }),
                     // Contacts icon or Red Backspace button
                     _controller.number.isNotEmpty
                         ? _NothingIconKey(
@@ -266,7 +285,20 @@ class _DialpadScreenState extends State<DialpadScreen> {
                 ),
                 // CALL pill
                 GestureDetector(
-                  onTap: () => _controller.call(context, phone),
+                  onTap: () async {
+                    await _controller.call(context, phone);
+                    if (!context.mounted) return;
+                    Navigator.pushReplacement(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => nothing_call.CallScreen(
+                          initialNumber: phone,
+                          initialState: 1,
+                          exitOnEnd: false,
+                        ),
+                      ),
+                    );
+                  },
                   child: Container(
                     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
                     decoration: BoxDecoration(

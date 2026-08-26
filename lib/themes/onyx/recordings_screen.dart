@@ -1,9 +1,7 @@
-import 'dart:io';
 import 'dart:async';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_contacts/flutter_contacts.dart';
 import 'package:intl/intl.dart';
 import 'dart:ui';
 import 'package:wavedialer/logic/recordings_controller.dart';

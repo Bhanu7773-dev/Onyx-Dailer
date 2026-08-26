@@ -7,6 +7,9 @@ import 'package:wavedialer/logic/contacts_controller.dart';
 import 'package:wavedialer/logic/profile_service.dart';
 import 'package:wavedialer/themes/nothing/nothing_dialogs.dart';
 import 'package:wavedialer/widgets/contact_details_sheet.dart';
+import 'package:wavedialer/logic/theme_controller.dart' as tc;
+
+String get _nFont => tc.ThemeController.instance.nothingFontFamily;
 
 // Nothing UI Colors
 const _bg = Color(0xFF000000);
@@ -87,10 +90,10 @@ class _ContactsScreenState extends State<ContactsScreen> {
         child: CupertinoActionSheet(
           title: Text(
             'CALL ${(contact.displayName ?? '').toUpperCase()}',
-            style: const TextStyle(
+            style: TextStyle(
               color: _nLabel,
               letterSpacing: 1.5,
-              fontFamily: 'NothingFont',
+              fontFamily: _nFont,
               fontWeight: FontWeight.bold,
             ),
           ),
@@ -108,7 +111,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
                 children: [
                   if (label.isNotEmpty && label != 'mobile')
                     Text('$label: ', style: const TextStyle(color: _nSecondary, fontSize: 14)),
-                  Text(p.number, style: const TextStyle(color: _nRed, fontWeight: FontWeight.bold, fontFamily: 'NothingFont')),
+                  Text(p.number, style: TextStyle(color: _nRed, fontWeight: FontWeight.bold, fontFamily: _nFont)),
                 ],
               ),
             );
@@ -116,7 +119,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
           cancelButton: CupertinoActionSheetAction(
             onPressed: () => Navigator.pop(ctx),
             isDefaultAction: true,
-            child: const Text('CANCEL', style: TextStyle(color: _nLabel, fontFamily: 'NothingFont')),
+            child: Text('CANCEL', style: TextStyle(color: _nLabel, fontFamily: _nFont)),
           ),
         ),
       ),
@@ -136,12 +139,12 @@ class _ContactsScreenState extends State<ContactsScreen> {
         child: CupertinoActionSheet(
           title: Text(
             (contact.displayName ?? 'Contact').toUpperCase(),
-            style: const TextStyle(
+            style: TextStyle(
               color: _nLabel,
               fontWeight: FontWeight.bold,
               letterSpacing: 1.5,
               fontSize: 16,
-              fontFamily: 'NothingFont',
+              fontFamily: _nFont,
             ),
           ),
           message: phone != null
@@ -154,12 +157,12 @@ class _ContactsScreenState extends State<ContactsScreen> {
                   Navigator.pop(ctx);
                   _handleCall(contact);
                 },
-                child: const Row(
+                child: Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     Icon(Icons.call_rounded, color: _nLabel, size: 20),
                     SizedBox(width: 10),
-                    Text('Call', style: TextStyle(color: _nLabel, fontFamily: 'NothingFont')),
+                    Text('Call', style: TextStyle(color: _nLabel, fontFamily: _nFont)),
                   ],
                 ),
               ),
@@ -175,7 +178,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
                   const SizedBox(width: 10),
                   Text(
                     isFav ? 'Remove from Favourites' : 'Add to Favourites',
-                    style: const TextStyle(color: _nLabel, fontFamily: 'NothingFont'),
+                    style: TextStyle(color: _nLabel, fontFamily: _nFont),
                   ),
                 ],
               ),
@@ -185,12 +188,12 @@ class _ContactsScreenState extends State<ContactsScreen> {
                 Navigator.pop(ctx);
                 _showEditContactDialog(contact);
               },
-              child: const Row(
+              child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   Icon(CupertinoIcons.pencil, color: _nLabel, size: 20),
                   SizedBox(width: 10),
-                  Text('Edit Contact', style: TextStyle(color: _nLabel, fontFamily: 'NothingFont')),
+                  Text('Edit Contact', style: TextStyle(color: _nLabel, fontFamily: _nFont)),
                 ],
               ),
             ),
@@ -206,7 +209,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
                   const SizedBox(width: 10),
                   Text(
                     isBlocked ? 'Unblock Contact' : 'Block Contact',
-                    style: const TextStyle(color: _nLabel, fontFamily: 'NothingFont'),
+                    style: TextStyle(color: _nLabel, fontFamily: _nFont),
                   ),
                 ],
               ),
@@ -217,12 +220,12 @@ class _ContactsScreenState extends State<ContactsScreen> {
                 Navigator.pop(ctx);
                 _deleteContact(contact);
               },
-              child: const Row(
+              child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   Icon(CupertinoIcons.trash, color: _nRed, size: 20),
                   SizedBox(width: 10),
-                  Text('Delete Contact', style: TextStyle(color: _nRed, fontFamily: 'NothingFont')),
+                  Text('Delete Contact', style: TextStyle(color: _nRed, fontFamily: _nFont)),
                 ],
               ),
             ),
@@ -230,7 +233,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
           cancelButton: CupertinoActionSheetAction(
             isDefaultAction: true,
             onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel', style: TextStyle(color: _nSecondary, fontFamily: 'NothingFont')),
+            child: Text('Cancel', style: TextStyle(color: _nSecondary, fontFamily: _nFont)),
           ),
         ),
       ),
@@ -326,14 +329,14 @@ class _ContactsScreenState extends State<ContactsScreen> {
                     constraints: const BoxConstraints(),
                   ),
                   const SizedBox(width: 14),
-                  const Text(
+                  Text(
                     'CONTACTS',
                     style: TextStyle(
                       fontSize: 22,
                       fontWeight: FontWeight.w800,
                       color: _nLabel,
                       letterSpacing: 3.5,
-                      fontFamily: 'NothingFont',
+                      fontFamily: _nFont,
                     ),
                   ),
                   const Spacer(),
@@ -379,16 +382,16 @@ class _ContactsScreenState extends State<ContactsScreen> {
                         controller: _searchCtrl,
                         focusNode: _searchFocus,
                         onChanged: (q) => _controller.rebuild(q, favouritesOnly: _filterFavouritesOnly),
-                        style: const TextStyle(color: _nLabel, fontSize: 15, letterSpacing: 1, fontFamily: 'NothingFont'),
+                        style: TextStyle(color: _nLabel, fontSize: 15, letterSpacing: 1, fontFamily: _nFont),
                         cursorColor: _nRed,
-                        decoration: const InputDecoration(
+                        decoration: InputDecoration(
                           hintText: 'SEARCH',
                           hintStyle: TextStyle(
                             color: _nSecondary,
                             fontSize: 14,
                             fontWeight: FontWeight.w600,
                             letterSpacing: 2,
-                            fontFamily: 'NothingFont',
+                            fontFamily: _nFont,
                           ),
                           border: InputBorder.none,
                           isDense: true,
@@ -429,13 +432,13 @@ class _ContactsScreenState extends State<ContactsScreen> {
               padding: const EdgeInsets.fromLTRB(20, 10, 20, 8),
               child: Row(
                 children: [
-                  const Text(
+                  Text(
                     'A',
                     style: TextStyle(
                       color: _nSecondary,
                       fontSize: 14,
                       fontWeight: FontWeight.bold,
-                      fontFamily: 'NothingFont',
+                      fontFamily: _nFont,
                     ),
                   ),
                   const Spacer(),
@@ -472,7 +475,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
                               color: _filterFavouritesOnly ? _nRed : _nSecondary,
                               fontSize: 12,
                               fontWeight: FontWeight.w600,
-                              fontFamily: 'NothingFont',
+                              fontFamily: _nFont,
                             ),
                           ),
                         ],
@@ -490,11 +493,11 @@ class _ContactsScreenState extends State<ContactsScreen> {
                     ),
                     child: Text(
                       'Total: $contactsCount',
-                      style: const TextStyle(
+                      style: TextStyle(
                         color: _nSecondary,
                         fontSize: 12,
                         fontWeight: FontWeight.w600,
-                        fontFamily: 'NothingFont',
+                        fontFamily: _nFont,
                       ),
                     ),
                   ),
@@ -512,11 +515,11 @@ class _ContactsScreenState extends State<ContactsScreen> {
                             _filterFavouritesOnly
                                 ? 'NO FAVOURITE CONTACTS'
                                 : (_searchCtrl.text.isNotEmpty ? 'NO CONTACTS FOUND' : 'NO CONTACTS'),
-                            style: const TextStyle(
+                            style: TextStyle(
                               color: _nSecondary,
                               letterSpacing: 2,
                               fontWeight: FontWeight.bold,
-                              fontFamily: 'NothingFont',
+                              fontFamily: _nFont,
                             ),
                           ),
                         )
@@ -537,11 +540,11 @@ class _ContactsScreenState extends State<ContactsScreen> {
                                     padding: const EdgeInsets.only(top: 14, bottom: 6),
                                     child: Text(
                                       item,
-                                      style: const TextStyle(
+                                      style: TextStyle(
                                         color: _nSecondary,
                                         fontSize: 13,
                                         fontWeight: FontWeight.w700,
-                                        fontFamily: 'NothingFont',
+                                        fontFamily: _nFont,
                                       ),
                                     ),
                                   );
@@ -595,11 +598,11 @@ class _ContactsScreenState extends State<ContactsScreen> {
                                                     : Center(
                                                         child: Text(
                                                           initial,
-                                                          style: const TextStyle(
+                                                          style: TextStyle(
                                                             color: _nLabel,
                                                             fontWeight: FontWeight.w700,
                                                             fontSize: 16,
-                                                            fontFamily: 'NothingFont',
+                                                            fontFamily: _nFont,
                                                           ),
                                                         ),
                                                       ),
@@ -612,12 +615,12 @@ class _ContactsScreenState extends State<ContactsScreen> {
                                               name,
                                               maxLines: 1,
                                               overflow: TextOverflow.ellipsis,
-                                              style: const TextStyle(
+                                              style: TextStyle(
                                                 color: _nLabel,
                                                 fontSize: 14,
                                                 fontWeight: FontWeight.w600,
                                                 letterSpacing: 1.2,
-                                                fontFamily: 'NothingFont',
+                                                fontFamily: _nFont,
                                               ),
                                             ),
                                           ),

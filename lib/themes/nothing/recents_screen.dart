@@ -9,7 +9,11 @@ import 'package:wavedialer/logic/recents_controller.dart';
 import 'package:wavedialer/logic/profile_service.dart';
 import 'package:wavedialer/services/telecom_service.dart';
 import 'package:wavedialer/themes/nothing/nothing_dialogs.dart';
+import 'package:wavedialer/themes/nothing/call_screen.dart' as nothing_call;
 import 'package:wavedialer/widgets/contact_details_sheet.dart';
+import 'package:wavedialer/logic/theme_controller.dart' as tc;
+
+String get _nFont => tc.ThemeController.instance.nothingFontFamily;
 
 // Nothing UI Colors
 const _bg = Color(0xFF000000);
@@ -75,10 +79,21 @@ class _RecentsScreenState extends State<RecentsScreen> with WidgetsBindingObserv
     if (mounted) setState(() {});
   }
 
-  void _dial(String number) {
+  void _dial(String number) async {
     _searchFocus.unfocus();
     HapticFeedback.lightImpact();
-    TelecomService.handleOutgoingCall(context, number);
+    await TelecomService.handleOutgoingCall(context, number);
+    if (!context.mounted) return;
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => nothing_call.CallScreen(
+          initialNumber: number,
+          initialState: 1,
+          exitOnEnd: false,
+        ),
+      ),
+    );
   }
 
   void _showLogOptions(CallLogEntry log, String displayName, String? photoUrl) {
@@ -94,12 +109,12 @@ class _RecentsScreenState extends State<RecentsScreen> with WidgetsBindingObserv
         child: CupertinoActionSheet(
           title: Text(
             displayName.toUpperCase(),
-            style: const TextStyle(
+            style: TextStyle(
               color: _nLabel,
               fontWeight: FontWeight.bold,
               letterSpacing: 1.5,
               fontSize: 16,
-              fontFamily: 'NothingFont',
+              fontFamily: _nFont,
             ),
           ),
           message: number.isNotEmpty
@@ -111,12 +126,12 @@ class _RecentsScreenState extends State<RecentsScreen> with WidgetsBindingObserv
                 Navigator.pop(ctx);
                 _dial(number);
               },
-              child: const Row(
+              child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   Icon(Icons.call_rounded, color: _nLabel, size: 20),
                   SizedBox(width: 10),
-                  Text('Call', style: TextStyle(color: _nLabel, fontFamily: 'NothingFont')),
+                  Text('Call', style: TextStyle(color: _nLabel, fontFamily: _nFont)),
                 ],
               ),
             ),
@@ -128,12 +143,12 @@ class _RecentsScreenState extends State<RecentsScreen> with WidgetsBindingObserv
                   await FlutterContacts.native.showCreator(contact: c);
                   _controller.fetchCallLogs();
                 },
-                child: const Row(
+                child: Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     Icon(Icons.person_add_outlined, color: _nLabel, size: 20),
                     SizedBox(width: 10),
-                    Text('Add to Contacts', style: TextStyle(color: _nLabel, fontFamily: 'NothingFont')),
+                    Text('Add to Contacts', style: TextStyle(color: _nLabel, fontFamily: _nFont)),
                   ],
                 ),
               ),
@@ -149,12 +164,12 @@ class _RecentsScreenState extends State<RecentsScreen> with WidgetsBindingObserv
                     avatarTextColor: _nLabel,
                   );
                 },
-                child: const Row(
+                child: Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     Icon(Icons.info_outline_rounded, color: _nLabel, size: 20),
                     SizedBox(width: 10),
-                    Text('View Details', style: TextStyle(color: _nLabel, fontFamily: 'NothingFont')),
+                    Text('View Details', style: TextStyle(color: _nLabel, fontFamily: _nFont)),
                   ],
                 ),
               ),
@@ -182,7 +197,7 @@ class _RecentsScreenState extends State<RecentsScreen> with WidgetsBindingObserv
                     const SizedBox(width: 10),
                     Text(
                       isBlocked ? 'Unblock Number' : 'Block Number',
-                      style: const TextStyle(color: _nLabel, fontFamily: 'NothingFont'),
+                      style: TextStyle(color: _nLabel, fontFamily: _nFont),
                     ),
                   ],
                 ),
@@ -202,12 +217,12 @@ class _RecentsScreenState extends State<RecentsScreen> with WidgetsBindingObserv
                   _controller.deleteLog(log);
                 }
               },
-              child: const Row(
+              child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   Icon(CupertinoIcons.trash, color: _nRed, size: 20),
                   SizedBox(width: 10),
-                  Text('Delete Log', style: TextStyle(color: _nRed, fontFamily: 'NothingFont')),
+                  Text('Delete Log', style: TextStyle(color: _nRed, fontFamily: _nFont)),
                 ],
               ),
             ),
@@ -215,7 +230,7 @@ class _RecentsScreenState extends State<RecentsScreen> with WidgetsBindingObserv
           cancelButton: CupertinoActionSheetAction(
             isDefaultAction: true,
             onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel', style: TextStyle(color: _nSecondary, fontFamily: 'NothingFont')),
+            child: Text('Cancel', style: TextStyle(color: _nSecondary, fontFamily: _nFont)),
           ),
         ),
       ),
@@ -304,14 +319,14 @@ class _RecentsScreenState extends State<RecentsScreen> with WidgetsBindingObserv
                     constraints: const BoxConstraints(),
                   ),
                   const SizedBox(width: 14),
-                  const Text(
+                  Text(
                     'RECENTS',
                     style: TextStyle(
                       fontSize: 22,
                       fontWeight: FontWeight.w800,
                       color: _nLabel,
                       letterSpacing: 3.5,
-                      fontFamily: 'NothingFont',
+                      fontFamily: _nFont,
                     ),
                   ),
                   const Spacer(),
@@ -357,16 +372,16 @@ class _RecentsScreenState extends State<RecentsScreen> with WidgetsBindingObserv
                         controller: _searchCtrl,
                         focusNode: _searchFocus,
                         onChanged: (_) => setState(() {}),
-                        style: const TextStyle(color: _nLabel, fontSize: 15, letterSpacing: 1, fontFamily: 'NothingFont'),
+                        style: TextStyle(color: _nLabel, fontSize: 15, letterSpacing: 1, fontFamily: _nFont),
                         cursorColor: _nRed,
-                        decoration: const InputDecoration(
+                        decoration: InputDecoration(
                           hintText: 'SEARCH RECENTS',
                           hintStyle: TextStyle(
                             color: _nSecondary,
                             fontSize: 13,
                             fontWeight: FontWeight.w600,
                             letterSpacing: 1.5,
-                            fontFamily: 'NothingFont',
+                            fontFamily: _nFont,
                           ),
                           border: InputBorder.none,
                           isDense: true,
@@ -426,7 +441,7 @@ class _RecentsScreenState extends State<RecentsScreen> with WidgetsBindingObserv
                           color: !_missedOnly ? _nRed : _nSecondary,
                           fontSize: 12,
                           fontWeight: FontWeight.w700,
-                          fontFamily: 'NothingFont',
+                          fontFamily: _nFont,
                           letterSpacing: 1.2,
                         ),
                       ),
@@ -452,7 +467,7 @@ class _RecentsScreenState extends State<RecentsScreen> with WidgetsBindingObserv
                           color: _missedOnly ? _nRed : _nSecondary,
                           fontSize: 12,
                           fontWeight: FontWeight.w700,
-                          fontFamily: 'NothingFont',
+                          fontFamily: _nFont,
                           letterSpacing: 1.2,
                         ),
                       ),
@@ -469,11 +484,11 @@ class _RecentsScreenState extends State<RecentsScreen> with WidgetsBindingObserv
                     ),
                     child: Text(
                       'Total: $count',
-                      style: const TextStyle(
+                      style: TextStyle(
                         color: _nSecondary,
                         fontSize: 12,
                         fontWeight: FontWeight.w600,
-                        fontFamily: 'NothingFont',
+                        fontFamily: _nFont,
                       ),
                     ),
                   ),
@@ -489,11 +504,11 @@ class _RecentsScreenState extends State<RecentsScreen> with WidgetsBindingObserv
                       ? Center(
                           child: Text(
                             _missedOnly ? 'NO MISSED CALLS' : 'NO CALL HISTORY',
-                            style: const TextStyle(
+                            style: TextStyle(
                               color: _nSecondary,
                               letterSpacing: 2,
                               fontWeight: FontWeight.bold,
-                              fontFamily: 'NothingFont',
+                              fontFamily: _nFont,
                             ),
                           ),
                         )
@@ -539,7 +554,7 @@ class _RecentsScreenState extends State<RecentsScreen> with WidgetsBindingObserv
                                               color: isMissed ? _nRed : _nLabel,
                                               fontWeight: FontWeight.w700,
                                               fontSize: 16,
-                                              fontFamily: 'NothingFont',
+                                              fontFamily: _nFont,
                                             ),
                                           ),
                                         ),
@@ -559,7 +574,7 @@ class _RecentsScreenState extends State<RecentsScreen> with WidgetsBindingObserv
                                                 fontSize: 14,
                                                 fontWeight: FontWeight.w600,
                                                 letterSpacing: 1.2,
-                                                fontFamily: 'NothingFont',
+                                                fontFamily: _nFont,
                                               ),
                                             ),
                                             const SizedBox(height: 3),
@@ -569,10 +584,10 @@ class _RecentsScreenState extends State<RecentsScreen> with WidgetsBindingObserv
                                                 const SizedBox(width: 6),
                                                 Text(
                                                   _formatTimestamp(log.timestamp),
-                                                  style: const TextStyle(
+                                                  style: TextStyle(
                                                     color: _nSecondary,
                                                     fontSize: 12,
-                                                    fontFamily: 'NothingFont',
+                                                    fontFamily: _nFont,
                                                   ),
                                                 ),
                                               ],

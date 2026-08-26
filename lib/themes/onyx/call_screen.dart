@@ -1,10 +1,8 @@
 import 'dart:async';
-import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_contacts/flutter_contacts.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:wavedialer/services/telecom_service.dart';
 import 'package:wavedialer/themes/onyx/dialpad_screen.dart';
 import 'package:proximity_sensor/proximity_sensor.dart';
@@ -68,8 +66,7 @@ class _CallScreenState extends State<CallScreen> {
     // Manage exit transition when call ends
     if (_controller.callState == 7) {
       ProximitySensor.setProximityScreenOff(false);
-      if (_exitTimer == null) {
-        _exitTimer = Timer(Duration(seconds: widget.exitOnEnd ? 1 : 2), () {
+      _exitTimer ??= Timer(Duration(seconds: widget.exitOnEnd ? 1 : 2), () {
           if (mounted) {
             ProximitySensor.setProximityScreenOff(false);
             if (widget.exitOnEnd) {
@@ -79,7 +76,6 @@ class _CallScreenState extends State<CallScreen> {
             }
           }
         });
-      }
     }
   }
 

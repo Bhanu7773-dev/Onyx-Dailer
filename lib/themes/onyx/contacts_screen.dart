@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter_contacts/flutter_contacts.dart';
-import 'package:permission_handler/permission_handler.dart';
 import 'package:wavedialer/services/telecom_service.dart';
 import 'package:wavedialer/widgets/contact_details_sheet.dart';
 import 'package:wavedialer/widgets/contact_dialogs.dart';

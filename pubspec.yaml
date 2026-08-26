@@ -83,3 +83,6 @@ flutter:
     - family: NothingFont
       fonts:
         - asset: assets/nothing-font-5x7.otf
+    - family: NotoSerifFont
+      fonts:
+        - asset: assets/NotoSerif-Regular.ttf

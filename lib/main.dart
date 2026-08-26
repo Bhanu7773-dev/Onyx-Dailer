@@ -4,7 +4,6 @@ import 'package:wavedialer/theme/app_theme.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:wavedialer/services/telecom_service.dart';
 import 'dart:async';
-import 'package:flutter/foundation.dart';
 import 'package:proximity_sensor/proximity_sensor.dart';
 import 'package:wavedialer/logic/theme_controller.dart';
 import 'package:wavedialer/logic/theme_router.dart';
@@ -20,7 +19,7 @@ void main() {
 }
 
 class OnyxDialerApp extends StatefulWidget {
-  const OnyxDialerApp({Key? key}) : super(key: key);
+  const OnyxDialerApp({super.key});
 
   @override
   State<OnyxDialerApp> createState() => _OnyxDialerAppState();
@@ -160,16 +159,17 @@ class _OnyxDialerAppState extends State<OnyxDialerApp> with WidgetsBindingObserv
     debugPrint('OnyxMain: build - isLoading = $_isLoading, isLaunchedForCall = $_isLaunchedForCall, startMode = $_startMode, theme = $theme');
     
     final isNothing = theme == 'nothing';
-    final activeLightTheme = isNothing 
+    final nFont = ThemeController.instance.nothingFontFamily;
+    final activeLightTheme = isNothing
         ? AppTheme.lightTheme.copyWith(
-            textTheme: AppTheme.lightTheme.textTheme.apply(fontFamily: 'NothingFont'),
-            primaryTextTheme: AppTheme.lightTheme.primaryTextTheme.apply(fontFamily: 'NothingFont'),
+            textTheme: AppTheme.lightTheme.textTheme.apply(fontFamily: nFont),
+            primaryTextTheme: AppTheme.lightTheme.primaryTextTheme.apply(fontFamily: nFont),
           )
         : AppTheme.lightTheme;
-    final activeDarkTheme = isNothing 
+    final activeDarkTheme = isNothing
         ? AppTheme.darkTheme.copyWith(
-            textTheme: AppTheme.darkTheme.textTheme.apply(fontFamily: 'NothingFont'),
-            primaryTextTheme: AppTheme.darkTheme.primaryTextTheme.apply(fontFamily: 'NothingFont'),
+            textTheme: AppTheme.darkTheme.textTheme.apply(fontFamily: nFont),
+            primaryTextTheme: AppTheme.darkTheme.primaryTextTheme.apply(fontFamily: nFont),
           )
         : AppTheme.darkTheme;
 

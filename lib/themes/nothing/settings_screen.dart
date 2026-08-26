@@ -6,6 +6,9 @@ import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:wavedialer/services/telecom_service.dart';
 import 'package:wavedialer/logic/theme_controller.dart';
+import 'package:wavedialer/logic/theme_controller.dart' as tc;
+
+String get _nFont => tc.ThemeController.instance.nothingFontFamily;
 
 // Nothing UI Colors
 const _bg = Color(0xFF000000);
@@ -29,6 +32,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _spamProtection = false;
   String _defaultSim = 'ask';
   String _appTheme = 'nothing';
+  String _nothingFont = 'dot'; // 'dot' | 'serif'
   List<Map<String, String>> _simCards = [];
 
   @override
@@ -69,6 +73,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _spamProtection = prefs.getBool('spam_protection') ?? false;
         _defaultSim = prefs.getString('default_sim') ?? 'ask';
         _appTheme = prefs.getString('selected_layout_theme') ?? 'nothing';
+        _nothingFont = prefs.getString('nothing_font') ?? 'dot';
       });
     }
   }
@@ -105,6 +110,126 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (mounted) setState(() => _appTheme = value);
   }
 
+  Future<void> _setNothingFont(String font) async {
+    HapticFeedback.selectionClick();
+    await ThemeController.instance.setNothingFont(font);
+    if (mounted) setState(() => _nothingFont = font);
+  }
+
+  Widget _buildNothingFontPicker() {
+    final isDot = _nothingFont == 'dot';
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16),
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: _nCard,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: _nDivider, width: 1),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 10, 12, 8),
+            child: Text(
+              'NOTHING FONT STYLE',
+              style: TextStyle(
+                fontFamily: _nFont,
+                fontSize: 10,
+                letterSpacing: 2,
+                color: _nSecondary,
+              ),
+            ),
+          ),
+          // Segmented toggle
+          Container(
+            height: 48,
+            decoration: BoxDecoration(
+              color: const Color(0xFF0D0D0D),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Row(
+              children: [
+                // DOT-MATRIX option
+                Expanded(
+                  child: GestureDetector(
+                    onTap: () => _setNothingFont('dot'),
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 200),
+                      margin: const EdgeInsets.all(3),
+                      decoration: BoxDecoration(
+                        color: isDot ? _nRed : Colors.transparent,
+                        borderRadius: BorderRadius.circular(10),
+                        boxShadow: isDot
+                            ? [BoxShadow(color: _nRed.withValues(alpha: 0.3), blurRadius: 8)]
+                            : null,
+                      ),
+                      child: Center(
+                        child: Text(
+                          'DOT·MATRIX',
+                          style: TextStyle(
+                            fontFamily: _nFont,
+                            fontSize: 11,
+                            letterSpacing: 1.5,
+                            color: isDot ? Colors.white : _nSecondary,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                // SERIF option
+                Expanded(
+                  child: GestureDetector(
+                    onTap: () => _setNothingFont('serif'),
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 200),
+                      margin: const EdgeInsets.all(3),
+                      decoration: BoxDecoration(
+                        color: !isDot ? _nRed : Colors.transparent,
+                        borderRadius: BorderRadius.circular(10),
+                        boxShadow: !isDot
+                            ? [BoxShadow(color: _nRed.withValues(alpha: 0.3), blurRadius: 8)]
+                            : null,
+                      ),
+                      child: Center(
+                        child: Text(
+                          'Serif',
+                          style: TextStyle(
+                            fontFamily: 'NotoSerifFont',
+                            fontSize: 14,
+                            color: !isDot ? Colors.white : _nSecondary,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 4),
+          // Preview row
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+            child: Text(
+              isDot ? 'Aa  0123  NOTHING DIALER' : 'Aa  0123  Nothing Dialer',
+              style: TextStyle(
+                fontFamily: isDot ? 'NothingFont' : 'NotoSerifFont',
+                fontSize: isDot ? 13 : 15,
+                color: _nSecondary,
+                letterSpacing: isDot ? 1.2 : 0.3,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+
   void _showThemeSelectionSheet() {
     HapticFeedback.mediumImpact();
     showCupertinoModalPopup(
@@ -112,13 +237,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
       builder: (ctx) => BackdropFilter(
         filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
         child: CupertinoActionSheet(
-          title: const Text(
+          title: Text(
             'SELECT THEME',
             style: TextStyle(
               color: _nLabel,
               fontWeight: FontWeight.bold,
               letterSpacing: 2,
-              fontFamily: 'NothingFont',
+              fontFamily: _nFont,
             ),
           ),
           message: const Text(
@@ -134,7 +259,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  const Text('Nothing UI', style: TextStyle(color: _nLabel, fontFamily: 'NothingFont')),
+                  Text('Nothing UI', style: TextStyle(color: _nLabel, fontFamily: _nFont)),
                   if (_appTheme == 'nothing') ...[
                     const SizedBox(width: 8),
                     const Icon(CupertinoIcons.checkmark_alt, color: _nRed, size: 18),
@@ -150,7 +275,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  const Text('Onyx (iOS Style)', style: TextStyle(color: _nLabel, fontFamily: 'NothingFont')),
+                  Text('Onyx (iOS Style)', style: TextStyle(color: _nLabel, fontFamily: _nFont)),
                   if (_appTheme == 'onyx') ...[
                     const SizedBox(width: 8),
                     const Icon(CupertinoIcons.checkmark_alt, color: _nRed, size: 18),
@@ -162,7 +287,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           cancelButton: CupertinoActionSheetAction(
             isDefaultAction: true,
             onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel', style: TextStyle(color: _nSecondary, fontFamily: 'NothingFont')),
+            child: Text('Cancel', style: TextStyle(color: _nSecondary, fontFamily: _nFont)),
           ),
         ),
       ),
@@ -176,13 +301,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
       builder: (ctx) => BackdropFilter(
         filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
         child: CupertinoActionSheet(
-          title: const Text(
+          title: Text(
             'DEFAULT CALLING SIM',
             style: TextStyle(
               color: _nLabel,
               fontWeight: FontWeight.bold,
               letterSpacing: 2,
-              fontFamily: 'NothingFont',
+              fontFamily: _nFont,
             ),
           ),
           message: const Text(
@@ -198,7 +323,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  const Text('Ask Every Time', style: TextStyle(color: _nLabel, fontFamily: 'NothingFont')),
+                  Text('Ask Every Time', style: TextStyle(color: _nLabel, fontFamily: _nFont)),
                   if (_defaultSim == 'ask') ...[
                     const SizedBox(width: 8),
                     const Icon(CupertinoIcons.checkmark_alt, color: _nRed, size: 18),
@@ -214,7 +339,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Text(sim['label'] ?? 'Unknown SIM', style: const TextStyle(color: _nLabel, fontFamily: 'NothingFont')),
+                      Text(sim['label'] ?? 'Unknown SIM', style: TextStyle(color: _nLabel, fontFamily: _nFont)),
                       if (_defaultSim == sim['id']) ...[
                         const SizedBox(width: 8),
                         const Icon(CupertinoIcons.checkmark_alt, color: _nRed, size: 18),
@@ -226,7 +351,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           cancelButton: CupertinoActionSheetAction(
             isDefaultAction: true,
             onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel', style: TextStyle(color: _nSecondary, fontFamily: 'NothingFont')),
+            child: Text('Cancel', style: TextStyle(color: _nSecondary, fontFamily: _nFont)),
           ),
         ),
       ),
@@ -259,7 +384,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             fontWeight: FontWeight.bold,
             fontSize: 11,
             letterSpacing: 1.5,
-            fontFamily: 'NothingFont',
+            fontFamily: _nFont,
           ),
         ),
       );
@@ -283,14 +408,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     constraints: const BoxConstraints(),
                   ),
                   const SizedBox(width: 14),
-                  const Text(
+                  Text(
                     'SETTINGS',
                     style: TextStyle(
                       fontSize: 22,
                       fontWeight: FontWeight.w800,
                       color: _nLabel,
                       letterSpacing: 3.5,
-                      fontFamily: 'NothingFont',
+                      fontFamily: _nFont,
                     ),
                   ),
                 ],
@@ -323,6 +448,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       onTap: _showThemeSelectionSheet,
                     ),
                   ]),
+
+                  // Font switcher — only shown when Nothing theme is active
+                  if (_appTheme == 'nothing') ...[
+                    const SizedBox(height: 8),
+                    _buildNothingFontPicker(),
+                  ],
 
                   // Section 3: Call Recording
                   _buildSectionHeader('CALL RECORDING'),
@@ -386,12 +517,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
       padding: const EdgeInsets.only(left: 20, right: 20, top: 22, bottom: 8),
       child: Text(
         title,
-        style: const TextStyle(
+        style: TextStyle(
           color: _nSecondary,
           fontSize: 12,
           fontWeight: FontWeight.bold,
           letterSpacing: 2,
-          fontFamily: 'NothingFont',
+          fontFamily: _nFont,
         ),
       ),
     );
@@ -419,12 +550,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
       onTap: onTap,
       title: Text(
         title,
-        style: const TextStyle(
+        style: TextStyle(
           color: _nLabel,
           fontSize: 14,
           fontWeight: FontWeight.bold,
           letterSpacing: 1.2,
-          fontFamily: 'NothingFont',
+          fontFamily: _nFont,
         ),
       ),
       subtitle: subtitle != null
@@ -452,12 +583,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
       onChanged: onChanged,
       title: Text(
         title,
-        style: const TextStyle(
+        style: TextStyle(
           color: _nLabel,
           fontSize: 14,
           fontWeight: FontWeight.bold,
           letterSpacing: 1.2,
-          fontFamily: 'NothingFont',
+          fontFamily: _nFont,
         ),
       ),
       subtitle: Text(

@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/foundation.dart';
-import 'package:animations/animations.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -15,7 +14,7 @@ import 'package:wavedialer/themes/onyx/recordings_screen.dart';
 import 'package:wavedialer/services/telecom_service.dart';
 
 class HomeScreen extends StatefulWidget {
-  const HomeScreen({Key? key}) : super(key: key);
+  const HomeScreen({super.key});
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -483,7 +482,7 @@ class _SettingsDialogState extends State<_SettingsDialog> {
             subtitle: const Text('Starts recording on connect', style: TextStyle(color: Colors.grey, fontSize: 12)),
             value: _autoRecord,
             onChanged: _toggleAutoRecord,
-            activeColor: const Color(0xFF007AFF),
+            activeThumbColor: const Color(0xFF007AFF),
           ),
           const Divider(height: 32, color: Colors.white10),
 

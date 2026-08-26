@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:proximity_sensor/proximity_sensor.dart';
-import 'package:flutter/services.dart';
 
 class ProximityWrapper extends StatefulWidget {
   final Widget child;
