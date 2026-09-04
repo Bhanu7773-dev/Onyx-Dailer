@@ -135,10 +135,19 @@ class _OnyxDialerAppState extends State<OnyxDialerApp> with WidgetsBindingObserv
       }
       
       if (state == 7) {
-        _isCallScreenVisible = false;
         ProximitySensor.setProximityScreenOff(false);
         if (!_isLaunchedForCall) {
           if (mounted) setState(() {});
+        }
+        // Safety fallback: pop call screen after 3s if it's still showing
+        if (_isCallScreenVisible) {
+          _isCallScreenVisible = false;
+          Future.delayed(const Duration(seconds: 3), () {
+            if (mounted && _navigatorKey.currentState != null && _navigatorKey.currentState!.canPop()) {
+              _navigatorKey.currentState!.pop();
+              debugPrint('OnyxMain: Fallback pop of call screen after disconnect');
+            }
+          });
         }
       }
     });

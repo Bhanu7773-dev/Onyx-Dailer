@@ -31,6 +31,7 @@ class MainActivity: FlutterActivity() {
         private const val EVENT_CHANNEL = "dark.onyx.com/telecom_events"
         private const val REQUEST_PICK_IMAGE = 1001
         var isAppVisible = false
+        var instance: MainActivity? = null
     }
     private var pendingImageResult: MethodChannel.Result? = null
     private var eventSink: EventChannel.EventSink? = null
@@ -128,6 +129,7 @@ class MainActivity: FlutterActivity() {
     override fun onStart() {
         super.onStart()
         isAppVisible = true
+        instance = this
     }
 
     override fun onResume() {
@@ -143,6 +145,11 @@ class MainActivity: FlutterActivity() {
     override fun onStop() {
         super.onStop()
         isAppVisible = false
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        if (instance == this) instance = null
     }
 
     override fun onKeyDown(keyCode: Int, event: android.view.KeyEvent?): Boolean {

@@ -34,13 +34,14 @@ class CallScreen extends StatefulWidget {
   State<CallScreen> createState() => _CallScreenState();
 }
 
-class _CallScreenState extends State<CallScreen> {
+class _CallScreenState extends State<CallScreen> with WidgetsBindingObserver {
   final CallController _controller = CallController();
   Timer? _exitTimer;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _controller.init(
       initialNumber: widget.initialNumber ?? 'Unknown',
       initialState: widget.initialState ?? 0,
@@ -52,11 +53,29 @@ class _CallScreenState extends State<CallScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _controller.removeListener(_onControllerChange);
     _controller.dispose();
     _exitTimer?.cancel();
     ProximitySensor.setProximityScreenOff(false);
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // When app resumes from background, pop if call already ended
+    if (state == AppLifecycleState.resumed && _controller.callState == 7) {
+      debugPrint('CallScreen(Onyx): App resumed with ended call, popping...');
+      ProximitySensor.setProximityScreenOff(false);
+      _exitTimer?.cancel();
+      if (widget.exitOnEnd) {
+        SystemNavigator.pop();
+      } else if (mounted && Navigator.canPop(context)) {
+        Navigator.pop(context, _controller.dtmfInput);
+      } else if (mounted) {
+        SystemNavigator.pop();
+      }
+    }
   }
 
   void _onControllerChange() {

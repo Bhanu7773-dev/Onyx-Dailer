@@ -481,6 +481,21 @@ class CallService : InCallService() {
 
         if (currentCall == null) {
             isCallUiOpen = false
+            // If app is in background, silently remove call screen from recents
+            // (mimics Google Dialer behavior)
+            if (!MainActivity.isAppVisible) {
+                Log.d(TAG, "All calls ended while app in background, cleaning up recents")
+                try {
+                    val activity = MainActivity.instance
+                    if (activity != null) {
+                        activity.runOnUiThread {
+                            activity.moveTaskToBack(true)
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to clean up recents: ${e.message}")
+                }
+            }
         }
     }
 }

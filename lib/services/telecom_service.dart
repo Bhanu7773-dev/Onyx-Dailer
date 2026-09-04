@@ -18,8 +18,11 @@ class TelecomService {
 
   static Future<List<Map<String, String>>> getSimCards() async {
     try {
-      final List<dynamic> result = await _methodChannel.invokeMethod('getSimCards');
-      return result.map((e) => Map<String, String>.from(e as Map)).toList();
+      final List<dynamic>? result = await _methodChannel.invokeMethod('getSimCards');
+      if (result != null) {
+        return result.map((e) => Map<String, String>.from(e as Map)).toList();
+      }
+      return [];
     } catch (e) {
       debugPrint('TelecomService: Failed to get SIM cards: $e');
       return [];

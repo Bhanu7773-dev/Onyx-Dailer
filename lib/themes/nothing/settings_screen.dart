@@ -30,6 +30,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _autoRecord = false;
   bool _blockProximity = false;
   bool _spamProtection = false;
+
   String _defaultSim = 'ask';
   String _appTheme = 'nothing';
   String _nothingFont = 'dot'; // 'dot' | 'serif'
@@ -111,12 +112,26 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _loadSimCards() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.reload();
     final sims = await TelecomService.getSimCards();
     if (mounted) {
+      final savedSim = prefs.getString('default_sim') ?? 'ask';
+      final validIds = sims.map((s) => s['id']).toSet();
       setState(() {
         _simCards = sims;
-        if (_simCards.length == 1) {
-          _setDefaultSim(_simCards.first['id']!);
+        if (sims.length == 1) {
+          // Single SIM: auto-select it
+          _defaultSim = sims.first['id']!;
+          prefs.setString('default_sim', _defaultSim);
+        } else if (sims.length >= 2) {
+          // Dual SIM: use saved pref if valid, otherwise 'ask'
+          if (savedSim == 'ask' || validIds.contains(savedSim)) {
+            _defaultSim = savedSim;
+          } else {
+            _defaultSim = 'ask';
+            prefs.setString('default_sim', 'ask');
+          }
         }
       });
     }
@@ -144,6 +159,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
       });
     }
   }
+
+
 
   Future<void> _toggleAutoRecord(bool value) async {
     HapticFeedback.lightImpact();
@@ -362,7 +379,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   void _showSimSelectionSheet() {
+    if (_simCards.length < 2) return; // Only show when dual SIM
     HapticFeedback.mediumImpact();
+    final availableSims = _simCards;
+
     showCupertinoModalPopup(
       context: context,
       builder: (ctx) => BackdropFilter(
@@ -398,7 +418,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ],
               ),
             ),
-            ..._simCards.map((sim) => CupertinoActionSheetAction(
+            ...availableSims.map((sim) => CupertinoActionSheetAction(
                   onPressed: () {
                     _setDefaultSim(sim['id']!);
                     Navigator.pop(ctx);
@@ -543,13 +563,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   _buildSettingCard([
                     _buildListTile(
                       title: 'DEFAULT CALLING SIM',
-                      subtitle: _defaultSim == 'ask'
-                          ? 'Ask Every Time'
-                          : (_simCards.firstWhere((sim) => sim['id'] == _defaultSim, orElse: () => {'label': 'Unknown'})['label'] ?? 'Unknown'),
-                      trailing: _simCards.length <= 1
-                          ? null
-                          : const Icon(Icons.arrow_forward_ios_rounded, color: _nSecondary, size: 14),
-                      onTap: _simCards.length <= 1 ? null : _showSimSelectionSheet,
+                      subtitle: _simCards.length >= 2
+                          ? (_defaultSim == 'ask'
+                              ? 'Ask Every Time'
+                              : (_simCards.firstWhere(
+                                  (sim) => sim['id'] == _defaultSim,
+                                  orElse: () => {'label': 'SIM 1'},
+                                )['label'] ?? 'SIM 1'))
+                          : (_simCards.isNotEmpty
+                              ? (_simCards.first['label'] ?? 'SIM 1')
+                              : 'No SIM detected'),
+                      trailing: _simCards.length >= 2
+                          ? const Icon(Icons.arrow_forward_ios_rounded, color: _nSecondary, size: 14)
+                          : null,
+                      onTap: _simCards.length >= 2 ? _showSimSelectionSheet : null,
                     ),
                   ]),
 

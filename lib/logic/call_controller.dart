@@ -81,16 +81,28 @@ class CallController extends ChangeNotifier {
         }
       }
 
+      // Check if the disconnected number is a DIFFERENT call (multi-call scenario)
       if (newState == 7 && incomingNumber != _number) {
-        debugPrint('CallController: Other call disconnected, auto-unholding...');
-        Future.delayed(const Duration(milliseconds: 500), () {
-          if (_isHold) {
-            TelecomService.setHold(false);
-            _isHold = false;
-            notifyListeners();
-          }
-        });
-        return;
+        // Normalize both numbers for comparison (strip non-digits)
+        final cleanIncoming = incomingNumber.replaceAll(RegExp(r'\D'), '');
+        final cleanCurrent = _number.replaceAll(RegExp(r'\D'), '');
+        final isSameCall = cleanIncoming.isNotEmpty && cleanCurrent.isNotEmpty &&
+            (cleanIncoming.endsWith(cleanCurrent) || cleanCurrent.endsWith(cleanIncoming) ||
+             (cleanIncoming.length >= 10 && cleanCurrent.length >= 10 &&
+              cleanIncoming.substring(cleanIncoming.length - 10) == cleanCurrent.substring(cleanCurrent.length - 10)));
+        
+        if (!isSameCall) {
+          debugPrint('CallController: Other call disconnected ($incomingNumber != $_number), auto-unholding...');
+          Future.delayed(const Duration(milliseconds: 500), () {
+            if (_isHold) {
+              TelecomService.setHold(false);
+              _isHold = false;
+              notifyListeners();
+            }
+          });
+          return;
+        }
+        debugPrint('CallController: Same call disconnected (format mismatch: $incomingNumber vs $_number)');
       }
 
       if (_callState == 7 && newState != 7) {

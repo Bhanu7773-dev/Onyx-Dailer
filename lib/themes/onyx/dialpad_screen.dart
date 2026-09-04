@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_contacts/flutter_contacts.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:wavedialer/logic/dialpad_controller.dart';
+import 'package:wavedialer/services/telecom_service.dart';
 
 // iOS colors
 const _bg         = Color(0xFF000000);
@@ -12,6 +14,21 @@ const _iosSecondary = Color(0xFF8E8E93);
 const _keyBg      = Color(0xFF2C2C2E);   // button background
 const _keyBgPressed = Color(0xFF48484A); // pressed state
 
+double _getOnyxFontSize(int length) {
+  if (length <= 7) return 40;
+  if (length <= 10) return 32;
+  if (length <= 13) return 26;
+  if (length <= 16) return 21;
+  return 17;
+}
+
+double _getOnyxLetterSpacing(int length) {
+  if (length <= 7) return 2.0;
+  if (length <= 10) return 1.2;
+  if (length <= 13) return 0.6;
+  return 0.0;
+}
+
 class DialpadScreen extends StatefulWidget {
   const DialpadScreen({super.key});
 
@@ -21,12 +38,35 @@ class DialpadScreen extends StatefulWidget {
 
 class _DialpadScreenState extends State<DialpadScreen> {
   final DialpadController _controller = DialpadController();
+  List<Map<String, String>> _simCards = [];
+  String _defaultSim = 'ask';
 
   @override
   void initState() {
     super.initState();
     _controller.init();
     _controller.addListener(_onControllerChange);
+    _loadSimCards();
+  }
+
+  Future<void> _loadSimCards() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.reload(); // Ensure fresh values from disk
+      final sims = await TelecomService.getSimCards();
+      final defSim = prefs.getString('default_sim') ?? 'ask';
+      debugPrint('DialpadScreen: sims=${sims.length}, defaultSim=$defSim, simulate=${prefs.getBool('simulate_dual_sim')}');
+      if (mounted) {
+        setState(() {
+          _simCards = sims;
+          _defaultSim = defSim;
+        });
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _handleCall({String? simId}) async {
+    await _controller.call(context, null, simId);
   }
 
   @override
@@ -87,23 +127,47 @@ class _DialpadScreenState extends State<DialpadScreen> {
                 ),
               ),
 
+              // Matched contact name banner (if contact found)
+              if (_controller.number.isNotEmpty && _controller.matchedContact != null)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 6, left: 24, right: 24),
+                  child: Text(
+                    _controller.matchedContact!.displayName ?? '',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w500,
+                      color: _iosSecondary,
+                      letterSpacing: 0.5,
+                    ),
+                  ),
+                ),
+
               // Number display
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 24),
+                padding: const EdgeInsets.symmetric(horizontal: 20),
                 child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
                   children: [
+                    if (_controller.number.isNotEmpty)
+                      const SizedBox(width: 36)
+                    else
+                      const SizedBox.shrink(),
                     Expanded(
-                      child: Text(
-                        _controller.number,
-                        textAlign: TextAlign.center,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontSize: 42,
-                          fontWeight: FontWeight.w300,
-                          color: _iosLabel,
-                          letterSpacing: 2,
+                      child: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        alignment: Alignment.center,
+                        child: Text(
+                          _controller.number,
+                          textAlign: TextAlign.center,
+                          maxLines: 1,
+                          style: TextStyle(
+                            fontSize: _getOnyxFontSize(_controller.number.length),
+                            fontWeight: FontWeight.w300,
+                            color: _iosLabel,
+                            letterSpacing: _getOnyxLetterSpacing(_controller.number.length),
+                          ),
                         ),
                       ),
                     ),
@@ -111,12 +175,16 @@ class _DialpadScreenState extends State<DialpadScreen> {
                       GestureDetector(
                         onTap: _controller.delete,
                         onLongPress: _controller.clearAll,
-                        child: const Padding(
-                          padding: EdgeInsets.only(left: 8),
-                          child: Icon(Icons.backspace_outlined,
-                              color: _iosSecondary, size: 26),
+                        child: const SizedBox(
+                          width: 36,
+                          child: Center(
+                            child: Icon(Icons.backspace_outlined,
+                                color: _iosSecondary, size: 26),
+                          ),
                         ),
-                      ),
+                      )
+                    else
+                      const SizedBox.shrink(),
                   ],
                 ),
               ),
@@ -160,8 +228,15 @@ class _DialpadScreenState extends State<DialpadScreen> {
                 child: Stack(
                   alignment: Alignment.center,
                   children: [
-                    // Green call button (centred)
-                    _CallButton(onTap: () => _controller.call(context)),
+                    // Unified Split Capsule Pill if dual SIM and 'ask', otherwise classic call button
+                    _simCards.length >= 2 && _defaultSim == 'ask'
+                        ? _OnyxDualSimCapsuleButton(
+                            sim1: _simCards[0],
+                            sim2: _simCards[1],
+                            onCallSim1: () => _handleCall(simId: _simCards[0]['id']),
+                            onCallSim2: () => _handleCall(simId: _simCards[1]['id']),
+                          )
+                        : _CallButton(onTap: () => _handleCall()),
                   ],
                 ),
               ),
@@ -208,9 +283,14 @@ class _DialpadScreenState extends State<DialpadScreen> {
                 CircleAvatar(
                   radius: 20,
                   backgroundColor: const Color(0xFF48484A),
-                  child: Text(initial,
-                      style: const TextStyle(
-                          color: _iosLabel, fontSize: 16, fontWeight: FontWeight.w500)),
+                  backgroundImage: c.photo?.thumbnail != null
+                      ? MemoryImage(c.photo!.thumbnail!)
+                      : null,
+                  child: c.photo?.thumbnail == null
+                      ? Text(initial,
+                          style: const TextStyle(
+                              color: _iosLabel, fontSize: 16, fontWeight: FontWeight.w500))
+                      : null,
                 ),
                 const SizedBox(width: 12),
                 Expanded(
@@ -384,6 +464,188 @@ class _CallButtonState extends State<_CallButton> {
           ],
         ),
         child: const Icon(Icons.call_rounded, color: Colors.white, size: 32),
+      ),
+    );
+  }
+}
+
+// ── Unified Split Capsule Pill (Dual SIM - Onyx) ────────────────────────────
+
+class _OnyxDualSimCapsuleButton extends StatefulWidget {
+  final Map<String, String> sim1;
+  final Map<String, String> sim2;
+  final Future<void> Function() onCallSim1;
+  final Future<void> Function() onCallSim2;
+
+  const _OnyxDualSimCapsuleButton({
+    required this.sim1,
+    required this.sim2,
+    required this.onCallSim1,
+    required this.onCallSim2,
+  });
+
+  @override
+  State<_OnyxDualSimCapsuleButton> createState() => _OnyxDualSimCapsuleButtonState();
+}
+
+class _OnyxDualSimCapsuleButtonState extends State<_OnyxDualSimCapsuleButton> {
+  bool _sim1Pressed = false;
+  bool _sim2Pressed = false;
+
+  String _cleanLabel(String? raw, String fallback) {
+    if (raw == null || raw.trim().isEmpty) return fallback;
+    final clean = raw.trim().toUpperCase();
+    if (clean.length > 7) return clean.substring(0, 7);
+    return clean;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final label1 = _cleanLabel(widget.sim1['label'], 'SIM 1');
+    final label2 = _cleanLabel(widget.sim2['label'], 'SIM 2');
+
+    return Container(
+      width: 176,
+      height: 72,
+      decoration: BoxDecoration(
+        color: _iosGreen,
+        borderRadius: BorderRadius.circular(36),
+        boxShadow: [
+          BoxShadow(
+            color: _iosGreen.withValues(alpha: 0.40),
+            blurRadius: 22,
+            offset: const Offset(0, 6),
+          ),
+        ],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(36),
+        child: Row(
+          children: [
+            // SIM 1 Half
+            Expanded(
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTapDown: (_) => setState(() => _sim1Pressed = true),
+                onTapUp: (_) {
+                  setState(() => _sim1Pressed = false);
+                  widget.onCallSim1();
+                },
+                onTapCancel: () => setState(() => _sim1Pressed = false),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 70),
+                  color: _sim1Pressed
+                      ? Colors.black.withValues(alpha: 0.18)
+                      : Colors.transparent,
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          const Icon(Icons.call_rounded, color: Colors.white, size: 20),
+                          const SizedBox(width: 4),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withValues(alpha: 0.25),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: const Text(
+                              '1',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 11,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        label1,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                          letterSpacing: 0.5,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+
+            // Vertical hairline divider
+            Container(
+              width: 1.2,
+              height: 42,
+              color: Colors.white.withValues(alpha: 0.28),
+            ),
+
+            // SIM 2 Half
+            Expanded(
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTapDown: (_) => setState(() => _sim2Pressed = true),
+                onTapUp: (_) {
+                  setState(() => _sim2Pressed = false);
+                  widget.onCallSim2();
+                },
+                onTapCancel: () => setState(() => _sim2Pressed = false),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 70),
+                  color: _sim2Pressed
+                      ? Colors.black.withValues(alpha: 0.18)
+                      : Colors.transparent,
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          const Icon(Icons.call_rounded, color: Colors.white, size: 20),
+                          const SizedBox(width: 4),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withValues(alpha: 0.25),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: const Text(
+                              '2',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 11,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        label2,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                          letterSpacing: 0.5,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
