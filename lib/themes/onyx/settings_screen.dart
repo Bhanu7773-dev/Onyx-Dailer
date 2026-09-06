@@ -428,6 +428,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
               onTap: _isCheckingUpdate ? null : _checkUpdateManually,
             ),
           ]),
+
+          // Section 7: About & Legal
+          _buildSectionHeader('ABOUT & LEGAL'),
+          _buildSettingCard([
+            _buildListTile(
+              title: 'Open Source Licenses',
+              subtitle: 'Third-party libraries and licenses',
+              trailing: const Icon(CupertinoIcons.chevron_forward, color: _iosSecondary, size: 16),
+              onTap: () {
+                showLicensePage(
+                  context: context,
+                  applicationName: 'Onyx Dialer',
+                  applicationVersion: 'v$_currentVersion',
+                  applicationLegalese: '© 2026 Bhanu Pratap Singh Rajawat\nLicensed under the MIT License',
+                );
+              },
+            ),
+          ]),
           const SizedBox(height: 40),
         ],
       ),

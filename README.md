@@ -1,6 +1,6 @@
-# wavedialer
+# Onyx Dialer (wavedialer)
 
-A new Flutter project.
+A modern, fluid dialer application built with Flutter, featuring rich theme engines (Onyx and Nothing UI), custom call screens, background services, and call logging.
 
 ## Getting Started
 
@@ -14,4 +14,8 @@ A few resources to get you started if this is your first Flutter project:
 For help getting started with Flutter development, view the
 [online documentation](https://docs.flutter.dev/), which offers tutorials,
 samples, guidance on mobile development, and a full API reference.
-# Onyx-Dailer
+
+## License
+
+This project is open source and available under the [MIT License](LICENSE).
+

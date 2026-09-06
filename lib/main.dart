@@ -7,6 +7,7 @@ import 'dart:async';
 import 'package:proximity_sensor/proximity_sensor.dart';
 import 'package:wavedialer/logic/theme_controller.dart';
 import 'package:wavedialer/logic/theme_router.dart';
+import 'package:wavedialer/utils/app_licenses.dart';
 
 void main() {
   // 1. Minimum initialization to show the first frame
@@ -14,6 +15,9 @@ void main() {
   
   // 2. Set UI mode without waiting
   SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+
+  // 3. Register custom application licenses
+  registerAppLicenses();
 
   runApp(const OnyxDialerApp());
 }

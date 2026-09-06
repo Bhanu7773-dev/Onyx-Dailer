@@ -635,6 +635,26 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       onTap: _isCheckingUpdate ? null : _checkUpdateManually,
                     ),
                   ]),
+
+                  // Section 7: About & Legal
+                  _buildSectionHeader('ABOUT & LEGAL'),
+                  _buildSettingCard([
+                    _buildListTile(
+                      title: 'OPEN SOURCE LICENSES',
+                      subtitle: 'Third-party software libraries & credits',
+                      trailing: const Icon(Icons.arrow_forward_ios_rounded, color: _nSecondary, size: 14),
+                      onTap: () {
+                        HapticFeedback.selectionClick();
+                        showLicensePage(
+                          context: context,
+                          applicationName: 'Onyx Dialer',
+                          applicationVersion: 'v$_currentVersion',
+                          applicationLegalese: '© 2026 Bhanu Pratap Singh Rajawat\nLicensed under the MIT License',
+                        );
+                      },
+                    ),
+                  ]),
+                  const SizedBox(height: 40),
                 ],
               ),
             ),
