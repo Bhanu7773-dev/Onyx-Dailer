@@ -6,11 +6,15 @@ import 'package:wavedialer/themes/onyx/settings_screen.dart' as onyx_settings;
 import 'package:wavedialer/themes/nothing/home_screen.dart' as nothing_home;
 import 'package:wavedialer/themes/nothing/settings_screen.dart' as nothing_settings;
 import 'package:wavedialer/themes/nothing/call_screen.dart' as nothing_call;
+import 'package:wavedialer/themes/pixel/home_screen.dart' as pixel_home;
+import 'package:wavedialer/themes/pixel/settings_screen.dart' as pixel_settings;
+import 'package:wavedialer/themes/pixel/call_screen.dart' as pixel_call;
 
 class ThemeRouter {
   static Widget getStartupScreen(String theme) {
     switch (theme) {
       case 'nothing':
+      case 'pixel':
       case 'onyx':
       default:
         return const onyx_startup.StartupScreen();
@@ -21,6 +25,8 @@ class ThemeRouter {
     switch (theme) {
       case 'nothing':
         return const nothing_home.HomeScreen();
+      case 'pixel':
+        return const pixel_home.HomeScreen();
       case 'onyx':
       default:
         return const onyx_home.HomeScreen();
@@ -31,6 +37,8 @@ class ThemeRouter {
     switch (theme) {
       case 'nothing':
         return const nothing_settings.SettingsScreen();
+      case 'pixel':
+        return const pixel_settings.SettingsScreen();
       case 'onyx':
       default:
         return const onyx_settings.SettingsScreen();
@@ -54,6 +62,14 @@ class ThemeRouter {
           initialSeconds: initialSeconds,
           exitOnEnd: exitOnEnd,
         );
+      case 'pixel':
+        return pixel_call.CallScreen(
+          initialNumber: initialNumber,
+          initialState: initialState,
+          initialName: initialName,
+          initialSeconds: initialSeconds,
+          exitOnEnd: exitOnEnd,
+        );
       case 'onyx':
       default:
         return onyx_call.CallScreen(
@@ -66,3 +82,4 @@ class ThemeRouter {
     }
   }
 }
+

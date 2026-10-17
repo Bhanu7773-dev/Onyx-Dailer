@@ -2,8 +2,10 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:convert';
 import 'package:flutter/cupertino.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:wavedialer/logic/theme_controller.dart';
 
 class TelecomService {
   static const MethodChannel _methodChannel = MethodChannel('dark.onyx.com/telecom_commands');
@@ -49,6 +51,13 @@ class TelecomService {
 
     if (defaultSim == 'ask' && sims.length > 1) {
       if (!context.mounted) return;
+      
+      final currentTheme = ThemeController.instance.currentTheme;
+      if (currentTheme == 'pixel') {
+        _showPixelSimSelector(context, sims, number);
+        return;
+      }
+
       showCupertinoModalPopup(
         context: context,
         builder: (BuildContext context) => CupertinoActionSheet(
@@ -71,6 +80,157 @@ class TelecomService {
     } else {
       makeCall(number);
     }
+  }
+
+  static void _showPixelSimSelector(BuildContext context, List<Map<String, String>> sims, String number) {
+    const kCardBg = Color(0xFF161D26);
+    const kAvatarBg = Color(0xFF1E2632);
+    const kBlueAccent = Color(0xFF8AB4F8);
+    const kTextWhite = Color(0xFFFFFFFF);
+    const kTextMuted = Color(0xFF8E9CAE);
+    const kSeparator = Color(0xFF353E4A);
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: kCardBg,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 38,
+                  height: 4,
+                  margin: const EdgeInsets.only(bottom: 18),
+                  decoration: BoxDecoration(
+                    color: kSeparator,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              const Text(
+                'Select Calling SIM',
+                style: TextStyle(
+                  color: kTextWhite,
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: -0.2,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                'Choose a SIM card to call $number',
+                style: const TextStyle(color: kTextMuted, fontSize: 13),
+              ),
+              const SizedBox(height: 18),
+              ...sims.asMap().entries.map((entry) {
+                final index = entry.key;
+                final sim = entry.value;
+                final label = sim['label'] ?? 'SIM ${index + 1}';
+
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: InkWell(
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      makeCall(number, simId: sim['id']);
+                    },
+                    borderRadius: BorderRadius.circular(20),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                      decoration: BoxDecoration(
+                        color: kAvatarBg,
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(color: Colors.white.withValues(alpha: 0.04)),
+                      ),
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 44,
+                            height: 44,
+                            decoration: BoxDecoration(
+                              color: kBlueAccent.withValues(alpha: 0.12),
+                              shape: BoxShape.circle,
+                            ),
+                            child: const Icon(
+                              Icons.sim_card_rounded,
+                              color: kBlueAccent,
+                              size: 22,
+                            ),
+                          ),
+                          const SizedBox(width: 14),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  label,
+                                  style: const TextStyle(
+                                    color: kTextWhite,
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  'Slot ${index + 1}',
+                                  style: const TextStyle(
+                                    color: kTextMuted,
+                                    fontSize: 12.5,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          Container(
+                            width: 36,
+                            height: 36,
+                            decoration: const BoxDecoration(
+                              color: kCardBg,
+                              shape: BoxShape.circle,
+                            ),
+                            child: const Icon(
+                              Icons.call_rounded,
+                              color: kBlueAccent,
+                              size: 18,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                );
+              }),
+              const SizedBox(height: 6),
+              SizedBox(
+                width: double.infinity,
+                child: TextButton(
+                  style: TextButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                  ),
+                  onPressed: () => Navigator.pop(ctx),
+                  child: const Text(
+                    'Cancel',
+                    style: TextStyle(
+                      color: kTextMuted,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   static Future<void> answerCall() async {

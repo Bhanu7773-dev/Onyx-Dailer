@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_contacts/flutter_contacts.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:wavedialer/services/telecom_service.dart';
+import 'package:wavedialer/logic/theme_controller.dart';
 
 class DialpadController extends ChangeNotifier {
   String _number = '';
@@ -131,21 +132,7 @@ class DialpadController extends ChangeNotifier {
 
         if (res['type'] == 'imei' && context != null && context.mounted) {
           final info = res['info'] as String? ?? 'IMEI information unavailable';
-          showDialog(
-            context: context,
-            builder: (ctx) => AlertDialog(
-              backgroundColor: const Color(0xFF181818),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-              title: const Text('Device Information', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-              content: Text(info, style: const TextStyle(color: Colors.white70, fontSize: 16, height: 1.4)),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(ctx),
-                  child: const Text('OK', style: TextStyle(color: Color(0xFFE5162A), fontWeight: FontWeight.bold)),
-                ),
-              ],
-            ),
-          );
+          _showDeviceInfoDialog(context, info);
         }
       }
     }
@@ -242,21 +229,7 @@ class DialpadController extends ChangeNotifier {
         notifyListeners();
         if (res['type'] == 'imei' && context.mounted) {
           final info = res['info'] as String? ?? 'IMEI information unavailable';
-          showDialog(
-            context: context,
-            builder: (ctx) => AlertDialog(
-              backgroundColor: const Color(0xFF181818),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-              title: const Text('Device Information', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-              content: Text(info, style: const TextStyle(color: Colors.white70, fontSize: 16, height: 1.4)),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(ctx),
-                  child: const Text('OK', style: TextStyle(color: Color(0xFFE5162A), fontWeight: FontWeight.bold)),
-                ),
-              ],
-            ),
-          );
+          _showDeviceInfoDialog(context, info);
         }
         return false;
       }
@@ -270,4 +243,87 @@ class DialpadController extends ChangeNotifier {
     }
     return true;
   }
+
+  void _showDeviceInfoDialog(BuildContext context, String info) {
+    final theme = ThemeController.instance.currentTheme;
+    if (theme == 'pixel') {
+      showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: const Color(0xFF161D26),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
+          contentPadding: const EdgeInsets.fromLTRB(24, 20, 24, 16),
+          titlePadding: const EdgeInsets.fromLTRB(24, 24, 24, 0),
+          title: const Row(
+            children: [
+              Icon(Icons.info_outline_rounded, color: Color(0xFF8AB4F8), size: 24),
+              SizedBox(width: 12),
+              Text(
+                'Device Information',
+                style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 19),
+              ),
+            ],
+          ),
+          content: Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: const Color(0xFF0C0E12),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.04)),
+            ),
+            child: SelectableText(
+              info,
+              style: const TextStyle(
+                color: Color(0xFF8AB4F8),
+                fontSize: 15,
+                height: 1.4,
+                fontFamily: 'monospace',
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              style: TextButton.styleFrom(
+                foregroundColor: const Color(0xFF8E9CAE),
+              ),
+              onPressed: () {
+                Clipboard.setData(ClipboardData(text: info));
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Copied to clipboard'), duration: Duration(seconds: 1)),
+                );
+              },
+              child: const Text('Copy'),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFF8AB4F8),
+                foregroundColor: const Color(0xFF09182C),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+              ),
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('OK', style: TextStyle(fontWeight: FontWeight.bold)),
+            ),
+          ],
+        ),
+      );
+    } else {
+      showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: const Color(0xFF181818),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: const Text('Device Information', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+          content: Text(info, style: const TextStyle(color: Colors.white70, fontSize: 16, height: 1.4)),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('OK', style: TextStyle(color: Color(0xFFE5162A), fontWeight: FontWeight.bold)),
+            ),
+          ],
+        ),
+      );
+    }
+  }
 }
+

@@ -207,7 +207,7 @@ class OtaUpdateService {
       if (response.isRedirect || response.statusCode == 302 || response.statusCode == 301) {
         final redirectLocation = response.headers.value(HttpHeaders.locationHeader);
         if (redirectLocation != null) {
-          return downloadApk(redirectLocation, onProgress: onProgress);
+          return await downloadApk(redirectLocation, onProgress: onProgress);
         }
       }
 
@@ -277,6 +277,12 @@ class OtaUpdateService {
         context: context,
         barrierDismissible: false,
         builder: (ctx) => _NothingUpdateDialog(updateInfo: updateInfo),
+      );
+    } else if (theme == 'pixel') {
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) => _PixelUpdateDialog(updateInfo: updateInfo),
       );
     } else {
       showDialog(
@@ -735,3 +741,249 @@ class _OnyxUpdateDialogState extends State<_OnyxUpdateDialog> {
     );
   }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PIXEL MATERIAL 3 EXPRESSIVE THEMED UPDATE DIALOG
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _PixelUpdateDialog extends StatefulWidget {
+  final UpdateInfo updateInfo;
+  const _PixelUpdateDialog({required this.updateInfo});
+
+  @override
+  State<_PixelUpdateDialog> createState() => _PixelUpdateDialogState();
+}
+
+class _PixelUpdateDialogState extends State<_PixelUpdateDialog> {
+  bool _isDownloading = false;
+  double _progress = 0.0;
+  String? _downloadedPath;
+  String? _error;
+
+  Future<void> _startDownload() async {
+    setState(() {
+      _isDownloading = true;
+      _progress = 0.0;
+      _error = null;
+    });
+
+    final path = await OtaUpdateService.instance.downloadApk(
+      widget.updateInfo.apkDownloadUrl,
+      onProgress: (p, received, total) {
+        if (mounted) {
+          setState(() {
+            _progress = p;
+          });
+        }
+      },
+    );
+
+    if (mounted) {
+      if (path != null) {
+        setState(() {
+          _isDownloading = false;
+          _downloadedPath = path;
+          _progress = 1.0;
+        });
+        _installApk();
+      } else {
+        setState(() {
+          _isDownloading = false;
+          _error = 'Download failed. Please check internet connection.';
+        });
+      }
+    }
+  }
+
+  Future<void> _installApk() async {
+    if (_downloadedPath == null) return;
+    await OtaUpdateService.instance.installApk(_downloadedPath!);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    const kCardBg = Color(0xFF161D26);
+    const kAvatarBg = Color(0xFF1E2632);
+    const kBlueAccent = Color(0xFF8AB4F8);
+    const kButtonText = Color(0xFF09182C);
+    const kTextWhite = Color(0xFFFFFFFF);
+    const kTextMuted = Color(0xFF8E9CAE);
+    const kCoralRed = Color(0xFFFF7769);
+    const kNotesBg = Color(0xFF0C0E12);
+
+    final info = widget.updateInfo;
+
+    return AlertDialog(
+      backgroundColor: kCardBg,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
+      contentPadding: const EdgeInsets.fromLTRB(24, 24, 24, 16),
+      titlePadding: EdgeInsets.zero,
+      title: Padding(
+        padding: const EdgeInsets.fromLTRB(24, 24, 24, 0),
+        child: Column(
+          children: [
+            Container(
+              width: 52,
+              height: 52,
+              decoration: BoxDecoration(
+                color: kBlueAccent.withValues(alpha: 0.12),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.system_update_rounded,
+                color: kBlueAccent,
+                size: 26,
+              ),
+            ),
+            const SizedBox(height: 14),
+            const Text(
+              'Software Update',
+              style: TextStyle(
+                color: kTextWhite,
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+                letterSpacing: -0.2,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 4),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+              decoration: BoxDecoration(
+                color: kAvatarBg,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Text(
+                'v${info.latestTag}',
+                style: const TextStyle(
+                  color: kBlueAccent,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const SizedBox(height: 10),
+          Container(
+            constraints: const BoxConstraints(maxHeight: 140),
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: kNotesBg,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.04)),
+            ),
+            child: SingleChildScrollView(
+              child: Text(
+                info.releaseNotes,
+                style: const TextStyle(color: kTextMuted, fontSize: 13, height: 1.4),
+              ),
+            ),
+          ),
+          if (info.formattedSize.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            Center(
+              child: Text(
+                'Download size: ${info.formattedSize}',
+                style: const TextStyle(color: kTextMuted, fontSize: 12),
+              ),
+            ),
+          ],
+          if (_error != null) ...[
+            const SizedBox(height: 10),
+            Text(
+              _error!,
+              style: const TextStyle(color: kCoralRed, fontSize: 12.5),
+              textAlign: TextAlign.center,
+            ),
+          ],
+          if (_isDownloading) ...[
+            const SizedBox(height: 16),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(4),
+              child: LinearProgressIndicator(
+                value: _progress > 0 ? _progress : null,
+                backgroundColor: kAvatarBg,
+                valueColor: const AlwaysStoppedAnimation<Color>(kBlueAccent),
+                minHeight: 6,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'Downloading... ${(_progress * 100).toInt()}%',
+              style: const TextStyle(color: kTextMuted, fontSize: 12),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ],
+      ),
+      actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+      actions: [
+        Row(
+          children: [
+            if (!_isDownloading)
+              Expanded(
+                child: TextButton(
+                  style: TextButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+                  ),
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text(
+                    'Later',
+                    style: TextStyle(
+                      color: kTextMuted,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ),
+            if (!_isDownloading) const SizedBox(width: 8),
+            Expanded(
+              flex: _isDownloading ? 1 : 1,
+              child: _downloadedPath != null
+                  ? FilledButton(
+                      style: FilledButton.styleFrom(
+                        backgroundColor: kBlueAccent,
+                        foregroundColor: kButtonText,
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+                      ),
+                      onPressed: _installApk,
+                      child: const Text('Install Now', style: TextStyle(fontWeight: FontWeight.bold)),
+                    )
+                  : _isDownloading
+                      ? Container(
+                          padding: const EdgeInsets.symmetric(vertical: 10),
+                          child: const Center(
+                            child: SizedBox(
+                              width: 22,
+                              height: 22,
+                              child: CircularProgressIndicator(strokeWidth: 2.5, color: kBlueAccent),
+                            ),
+                          ),
+                        )
+                      : FilledButton(
+                          style: FilledButton.styleFrom(
+                            backgroundColor: kBlueAccent,
+                            foregroundColor: kButtonText,
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+                          ),
+                          onPressed: _startDownload,
+                          child: const Text('Update', style: TextStyle(fontWeight: FontWeight.bold)),
+                        ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+

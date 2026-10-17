@@ -19,6 +19,7 @@ class CallController extends ChangeNotifier {
   String _dtmfInput = '';
   int _callCount = 1;
   bool _isSpam = false;
+  String? _simLabel;
 
   StreamSubscription? _subscription;
   StreamSubscription<int>? _proximitySub;
@@ -40,6 +41,7 @@ class CallController extends ChangeNotifier {
   bool get isSpam => _isSpam;
   int get seconds => _seconds;
   bool get isNear => _isNear;
+  String? get simLabel => _simLabel;
 
   void init({
     required String initialNumber,
@@ -73,6 +75,10 @@ class CallController extends ChangeNotifier {
 
       final incomingNumber = (data['number'] as String?) ?? 'Unknown';
       final newState = data['state'] as int;
+
+      if (data['simLabel'] != null) {
+        _simLabel = data['simLabel'] as String;
+      }
 
       if (data['elapsedSeconds'] != null) {
         final syncedSec = data['elapsedSeconds'] as int;

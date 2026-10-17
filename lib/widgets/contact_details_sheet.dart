@@ -6,15 +6,16 @@ import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:wavedialer/services/telecom_service.dart';
 
-const _bg           = Color(0xFF1C1C1E);
-const _card         = Color(0xFF2C2C2E);
-const _iosBlue      = Color(0xFF007AFF);
-const _iosGreen     = Color(0xFF34C759);
-const _iosLabel     = Color(0xFFFFFFFF);
-const _iosSecondary = Color(0xFF8E8E93);
-const _iosTertiary  = Color(0xFF48484A);
-const _separator    = Color(0xFF38383A);
-const _iosRed       = Color(0xFFFF3B30);
+const _kSheetBg = Color(0xFF111419);
+const _kHandleColor = Color(0xFF353E4A);
+const _kAvatarBg = Color(0xFF1E2632);
+const _kCardBg = Color(0xFF161D26);
+const _kCallBg = Color(0xFF8AB4F8);
+const _kCallIconColor = Color(0xFF09182C);
+const _kTextWhite = Color(0xFFFFFFFF);
+const _kTextMuted = Color(0xFF8E9CAE);
+const _kCoralRed = Color(0xFFFF7769);
+const _kSeparator = Color(0xFF1C232E);
 
 class ContactDetailsSheet extends StatefulWidget {
   final String name;
@@ -44,199 +45,343 @@ class _ContactDetailsSheetState extends State<ContactDetailsSheet> {
   }
 
   Future<void> _fetchHistory() async {
-    final logs = await CallLog.get();
-    
-    // Normalize target phone
-    final targetPhone = widget.phone.replaceAll(RegExp(r'\D'), '');
-    
-    final filtered = logs.where((log) {
-      final logPhone = (log.number ?? '').replaceAll(RegExp(r'\D'), '');
-      return logPhone.isNotEmpty && (logPhone.contains(targetPhone) || targetPhone.contains(logPhone));
-    }).toList();
+    try {
+      final logs = await CallLog.get();
+      final targetDigits = widget.phone.replaceAll(RegExp(r'\D'), '');
+      final targetLast7 = targetDigits.length >= 7
+          ? targetDigits.substring(targetDigits.length - 7)
+          : targetDigits;
+      final targetName = widget.name.trim().toLowerCase();
 
-    if (mounted) setState(() => _history = filtered);
+      final filtered = logs.where((log) {
+        final logDigits = (log.number ?? '').replaceAll(RegExp(r'\D'), '');
+        final logName = (log.name ?? '').trim().toLowerCase();
+
+        // 1. Phone number match
+        if (targetDigits.isNotEmpty && logDigits.isNotEmpty) {
+          if (targetDigits == logDigits) return true;
+          if (targetDigits.contains(logDigits) || logDigits.contains(targetDigits)) return true;
+          if (targetLast7.isNotEmpty && logDigits.endsWith(targetLast7)) return true;
+        }
+
+        // 2. Name match (if name is valid and not a number)
+        if (targetName.isNotEmpty &&
+            logName.isNotEmpty &&
+            targetName != 'unknown' &&
+            targetName == logName) {
+          return true;
+        }
+
+        return false;
+      }).toList();
+
+      filtered.sort((a, b) => (b.timestamp ?? 0).compareTo(a.timestamp ?? 0));
+
+      if (mounted) setState(() => _history = filtered);
+    } catch (e) {
+      debugPrint('Error fetching call history: $e');
+      if (mounted) setState(() => _history = []);
+    }
   }
 
   void _dial() {
     HapticFeedback.lightImpact();
-    TelecomService.handleOutgoingCall(context, widget.phone);
-    Navigator.pop(context); // close sheet
+    final nav = Navigator.of(context);
+    final ctx = nav.context;
+    nav.pop();
+    TelecomService.handleOutgoingCall(ctx, widget.phone);
+  }
+
+  String _prepareWhatsAppNumber(String raw) {
+    var digits = raw.replaceAll(RegExp(r'\D'), '');
+    if (digits.startsWith('0') && digits.length == 11) {
+      digits = digits.substring(1);
+    }
+    if (digits.length == 10 && RegExp(r'^[6-9]').hasMatch(digits)) {
+      digits = '91$digits';
+    }
+    return digits;
   }
 
   Future<void> _openWhatsApp() async {
     HapticFeedback.selectionClick();
-    final url = Uri.parse('https://wa.me/${widget.phone.replaceAll(RegExp(r'\D'), '')}');
-    if (await canLaunchUrl(url)) {
-      await launchUrl(url, mode: LaunchMode.externalApplication);
+    final cleanNumber = _prepareWhatsAppNumber(widget.phone);
+    if (cleanNumber.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Invalid phone number for WhatsApp'),
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+      return;
+    }
+
+    bool launched = false;
+
+    // Strategy 1: Direct native WhatsApp app URI
+    try {
+      final nativeUri = Uri.parse('whatsapp://send?phone=$cleanNumber');
+      launched = await launchUrl(nativeUri, mode: LaunchMode.externalApplication);
+    } catch (_) {}
+
+    // Strategy 2: Universal wa.me URL
+    if (!launched) {
+      try {
+        final webUri = Uri.parse('https://wa.me/$cleanNumber');
+        launched = await launchUrl(webUri, mode: LaunchMode.externalApplication);
+      } catch (_) {}
+    }
+
+    // Strategy 3: WhatsApp API endpoint
+    if (!launched) {
+      try {
+        final apiUri = Uri.parse('https://api.whatsapp.com/send?phone=$cleanNumber');
+        launched = await launchUrl(apiUri, mode: LaunchMode.externalApplication);
+      } catch (_) {}
+    }
+
+    if (!launched && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Could not open WhatsApp. Please check if WhatsApp is installed.'),
+          duration: Duration(seconds: 2),
+        ),
+      );
     }
   }
 
   Future<void> _openSms() async {
     HapticFeedback.selectionClick();
-    final url = Uri.parse('sms:${widget.phone}');
-    if (await canLaunchUrl(url)) {
-      await launchUrl(url);
+    final phone = widget.phone.trim();
+    if (phone.isEmpty) return;
+
+    bool launched = false;
+
+    // Strategy 1: Standard SMS URI (sms:<number>)
+    try {
+      final smsUri = Uri(scheme: 'sms', path: phone);
+      launched = await launchUrl(smsUri, mode: LaunchMode.externalApplication);
+    } catch (_) {}
+
+    // Strategy 2: Direct Uri.parse
+    if (!launched) {
+      try {
+        final directUri = Uri.parse('sms:$phone');
+        launched = await launchUrl(directUri, mode: LaunchMode.externalApplication);
+      } catch (_) {}
+    }
+
+    // Strategy 3: smsto: scheme
+    if (!launched) {
+      try {
+        final smstoUri = Uri(scheme: 'smsto', path: phone);
+        launched = await launchUrl(smstoUri, mode: LaunchMode.externalApplication);
+      } catch (_) {}
+    }
+
+    if (!launched && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Could not open SMS app'),
+          duration: Duration(seconds: 2),
+        ),
+      );
     }
   }
 
-  IconData _callTypeIcon(CallType? type) {
-    switch (type) {
-      case CallType.incoming: return Icons.call_received_rounded;
-      case CallType.outgoing: return Icons.call_made_rounded;
-      case CallType.missed: return Icons.call_missed_rounded;
-      case CallType.rejected: return Icons.phone_disabled_rounded;
-      case CallType.blocked: return Icons.block_rounded;
-      default: return Icons.call_rounded;
-    }
-  }
-
-  String _callTypeLabel(CallType? type) {
-    switch (type) {
-      case CallType.incoming: return 'Incoming';
-      case CallType.outgoing: return 'Outgoing';
-      case CallType.missed: return 'Missed';
-      case CallType.rejected: return 'Rejected';
-      case CallType.blocked: return 'Blocked';
-      default: return 'Call';
-    }
-  }
-
-  String _formatTime(int? timestamp) {
+  String _formatCallDate(int? timestamp) {
     if (timestamp == null) return '';
     final dt = DateTime.fromMillisecondsSinceEpoch(timestamp);
     final now = DateTime.now();
-    final diff = now.difference(dt);
-    if (diff.inDays == 0 && now.day == dt.day) {
-      return DateFormat('h:mm a').format(dt);
-    } else if (diff.inDays < 7) {
-      return DateFormat('EEEE').format(dt); // e.g. Monday
+    final today = DateTime(now.year, now.month, now.day);
+    final itemDate = DateTime(dt.year, dt.month, dt.day);
+    final diffDays = today.difference(itemDate).inDays;
+
+    if (diffDays == 0) {
+      return 'Today';
+    } else if (diffDays == 1) {
+      return 'Yesterday';
+    } else if (diffDays > 1 && diffDays < 7) {
+      return DateFormat('EEEE').format(dt); // e.g. Friday, Thursday
     } else {
       return DateFormat('MMM d').format(dt); // e.g. Oct 12
     }
   }
 
   String _formatDuration(int? seconds) {
-    if (seconds == null || seconds == 0) return '';
+    if (seconds == null || seconds <= 0) return '';
     final m = seconds ~/ 60;
     final s = seconds % 60;
-    if (m > 0) return '$m min ${s > 0 ? '$s sec' : ''}';
+    if (m > 0) {
+      return '$m min${s > 0 ? ' $s sec' : ''}';
+    }
     return '$s sec';
   }
 
   @override
   Widget build(BuildContext context) {
-    final initial = widget.name.trim().isEmpty ? '#' : widget.name.trim()[0].toUpperCase();
-    final aColor = widget.avatarColor ?? _iosTertiary;
-    final aText = widget.avatarTextColor ?? _iosLabel;
+    final initial = widget.name.trim().isEmpty
+        ? (widget.phone.trim().isNotEmpty ? '#' : '?')
+        : widget.name.trim()[0].toUpperCase();
+
+    final screenHeight = MediaQuery.of(context).size.height;
 
     return Container(
+      height: screenHeight * 0.82,
       decoration: const BoxDecoration(
-        color: _bg,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        color: _kSheetBg,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
       ),
       child: Column(
-        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           // Drag handle
           Container(
-            margin: const EdgeInsets.only(top: 12, bottom: 20),
-            width: 40, height: 5,
+            margin: const EdgeInsets.only(top: 12, bottom: 18),
+            width: 38,
+            height: 4,
             decoration: BoxDecoration(
-              color: _iosSecondary.withOpacity(0.4),
-              borderRadius: BorderRadius.circular(3),
+              color: _kHandleColor,
+              borderRadius: BorderRadius.circular(2),
             ),
           ),
 
-          // Avatar
+          // Avatar circle
           Container(
-            width: 80, height: 80,
-            decoration: BoxDecoration(color: aColor, shape: BoxShape.circle),
+            width: 76,
+            height: 76,
+            decoration: BoxDecoration(
+              color: widget.avatarColor ?? _kAvatarBg,
+              shape: BoxShape.circle,
+            ),
             alignment: Alignment.center,
-            child: Text(initial, style: TextStyle(color: aText, fontSize: 36, fontWeight: FontWeight.w500)),
+            child: Text(
+              initial,
+              style: TextStyle(
+                color: widget.avatarTextColor ?? _kTextWhite,
+                fontSize: 32,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 14),
 
-          // Name & Number
-          Text(
-            widget.name,
-            style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w500, color: _iosLabel),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            widget.phone,
-            style: const TextStyle(fontSize: 16, color: _iosSecondary),
-          ),
-          const SizedBox(height: 24),
-
-          // Action Buttons
+          // Contact Name
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 24),
+            child: Text(
+              widget.name.trim().isNotEmpty ? widget.name : widget.phone,
+              textAlign: TextAlign.center,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                fontSize: 22,
+                fontWeight: FontWeight.w700,
+                color: _kTextWhite,
+                letterSpacing: -0.3,
+              ),
+            ),
+          ),
+          const SizedBox(height: 4),
+
+          // Phone Number
+          Text(
+            widget.phone,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              fontSize: 14,
+              color: _kTextMuted,
+              fontWeight: FontWeight.w400,
+            ),
+          ),
+          const SizedBox(height: 22),
+
+          // Action buttons row: Call, Message, WhatsApp
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
             child: Row(
               children: [
-                _actionBtn(const Icon(Icons.call_rounded, color: _iosBlue, size: 24), 'Call', _dial),
+                Expanded(
+                  child: _buildActionButton(
+                    icon: const Icon(Icons.call_rounded, color: _kCallIconColor, size: 24),
+                    label: 'Call',
+                    textColor: _kCallIconColor,
+                    bgColor: _kCallBg,
+                    onTap: _dial,
+                  ),
+                ),
                 const SizedBox(width: 12),
-                _actionBtn(const Icon(Icons.message_rounded, color: _iosBlue, size: 24), 'Message', _openSms),
+                Expanded(
+                  child: _buildActionButton(
+                    icon: const Icon(Icons.chat_bubble_outline_rounded, color: Colors.white, size: 22),
+                    label: 'Message',
+                    textColor: Colors.white,
+                    bgColor: _kCardBg,
+                    hasBorder: true,
+                    onTap: _openSms,
+                  ),
+                ),
                 const SizedBox(width: 12),
-                _actionBtn(const FaIcon(FontAwesomeIcons.whatsapp, color: Color(0xFF25D366), size: 24), 'WhatsApp', _openWhatsApp, color: const Color(0xFF25D366)),
+                Expanded(
+                  child: _buildActionButton(
+                    icon: const FaIcon(FontAwesomeIcons.whatsapp, color: Colors.white, size: 23),
+                    label: 'WhatsApp',
+                    textColor: Colors.white,
+                    bgColor: _kCardBg,
+                    hasBorder: true,
+                    onTap: _openWhatsApp,
+                  ),
+                ),
               ],
             ),
           ),
           const SizedBox(height: 24),
 
-          // History Section Header
+          // Section header: RECENT CALLS
           const Padding(
-            padding: EdgeInsets.fromLTRB(24, 0, 24, 8),
+            padding: EdgeInsets.symmetric(horizontal: 24),
             child: Align(
               alignment: Alignment.centerLeft,
-              child: Text('RECENT CALLS', style: TextStyle(color: _iosSecondary, fontSize: 12, fontWeight: FontWeight.w600, letterSpacing: 0.5)),
+              child: Text(
+                'RECENT CALLS',
+                style: TextStyle(
+                  color: _kTextMuted,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 1.2,
+                ),
+              ),
             ),
           ),
+          const SizedBox(height: 8),
 
-          // History List
+          // History list
           Expanded(
             child: _history == null
-                ? const Center(child: CircularProgressIndicator(color: _iosBlue))
+                ? const Center(child: CircularProgressIndicator(color: _kCallBg))
                 : _history!.isEmpty
-                    ? const Center(child: Text('No recent history', style: TextStyle(color: _iosSecondary, fontSize: 15)))
-                    : ListView.builder(
-                        padding: const EdgeInsets.only(bottom: 40),
+                    ? const Center(
+                        child: Text(
+                          'No recent call history',
+                          style: TextStyle(color: _kTextMuted, fontSize: 14),
+                        ),
+                      )
+                    : ListView.separated(
+                        physics: const BouncingScrollPhysics(),
+                        padding: const EdgeInsets.only(top: 4, bottom: 32),
                         itemCount: _history!.length,
-                        itemBuilder: (ctx, i) {
-                          final log = _history![i];
-                          final missed = log.callType == CallType.missed || log.callType == CallType.rejected;
-                          final color = missed ? _iosRed : _iosSecondary;
-                          final isLast = i == _history!.length - 1;
-
-                          return Container(
-                            color: _bg, // iOS list bg
-                            padding: const EdgeInsets.only(left: 24),
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 24),
-                              decoration: BoxDecoration(
-                                border: isLast ? null : const Border(bottom: BorderSide(color: _separator, width: 0.5)),
-                              ),
-                              child: Row(
-                                children: [
-                                  Icon(_callTypeIcon(log.callType), color: color, size: 16),
-                                  const SizedBox(width: 12),
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
-                                      children: [
-                                        Text(_callTypeLabel(log.callType), style: TextStyle(color: color, fontSize: 16)),
-                                        if (_formatDuration(log.duration).isNotEmpty)
-                                          Padding(
-                                            padding: const EdgeInsets.only(top: 2),
-                                            child: Text(_formatDuration(log.duration), style: const TextStyle(color: _iosSecondary, fontSize: 13)),
-                                          ),
-                                      ],
-                                    ),
-                                  ),
-                                  Text(_formatTime(log.timestamp), style: const TextStyle(color: _iosSecondary, fontSize: 14)),
-                                ],
-                              ),
-                            ),
-                          );
+                        separatorBuilder: (_, _) => const Divider(
+                          height: 1,
+                          thickness: 0.6,
+                          color: _kSeparator,
+                          indent: 24,
+                          endIndent: 24,
+                        ),
+                        itemBuilder: (context, index) {
+                          final log = _history![index];
+                          return _buildCallLogItem(log);
                         },
                       ),
           ),
@@ -245,23 +390,138 @@ class _ContactDetailsSheetState extends State<ContactDetailsSheet> {
     );
   }
 
-  Widget _actionBtn(Widget iconWidget, String label, VoidCallback onTap, {Color color = _iosBlue}) {
-    return Expanded(
-      child: GestureDetector(
+  Widget _buildActionButton({
+    required Widget icon,
+    required String label,
+    required Color textColor,
+    required Color bgColor,
+    bool hasBorder = false,
+    required VoidCallback onTap,
+  }) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
         onTap: onTap,
+        borderRadius: BorderRadius.circular(24),
         child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 12),
+          height: 74,
           decoration: BoxDecoration(
-            color: _card,
-            borderRadius: BorderRadius.circular(12),
+            color: bgColor,
+            borderRadius: BorderRadius.circular(24),
+            border: hasBorder
+                ? Border.all(color: Colors.white.withValues(alpha: 0.05))
+                : null,
           ),
           child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              iconWidget,
-              const SizedBox(height: 4),
-              Text(label, style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.w500)),
+              icon,
+              const SizedBox(height: 6),
+              Text(
+                label,
+                style: TextStyle(
+                  color: textColor,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCallLogItem(CallLogEntry log) {
+    final isMissed = log.callType == CallType.missed;
+    final isDeclined = log.callType == CallType.rejected || log.callType == CallType.blocked;
+    final isOutgoing = log.callType == CallType.outgoing;
+
+    final IconData arrowIcon;
+    final Color arrowColor;
+    final String labelText;
+    final Color labelColor;
+
+    if (isMissed) {
+      arrowIcon = Icons.south_west_rounded;
+      arrowColor = _kCoralRed;
+      labelText = 'Missed';
+      labelColor = _kCoralRed;
+    } else if (isDeclined) {
+      arrowIcon = Icons.south_west_rounded;
+      arrowColor = _kCoralRed;
+      labelText = 'Declined';
+      labelColor = _kCoralRed;
+    } else if (isOutgoing) {
+      arrowIcon = Icons.north_east_rounded;
+      arrowColor = _kTextMuted;
+      labelText = 'Outgoing';
+      labelColor = Colors.white;
+    } else {
+      arrowIcon = Icons.south_west_rounded;
+      arrowColor = _kTextMuted;
+      labelText = 'Incoming';
+      labelColor = Colors.white;
+    }
+
+    final durationStr = _formatDuration(log.duration);
+    final dateStr = _formatCallDate(log.timestamp);
+
+    return InkWell(
+      onTap: () {
+        HapticFeedback.selectionClick();
+        _dial();
+      },
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 13),
+        child: Row(
+          children: [
+            // Direction Arrow
+            SizedBox(
+              width: 24,
+              child: Icon(arrowIcon, color: arrowColor, size: 16),
+            ),
+            const SizedBox(width: 14),
+
+            // Call Type & Duration
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    labelText,
+                    style: TextStyle(
+                      color: labelColor,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  if (durationStr.isNotEmpty && !isMissed && !isDeclined)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 2),
+                      child: Text(
+                        durationStr,
+                        style: const TextStyle(
+                          color: _kTextMuted,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w400,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+
+            // Day / Date
+            Text(
+              dateStr,
+              style: const TextStyle(
+                color: _kTextMuted,
+                fontSize: 14,
+                fontWeight: FontWeight.w400,
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -278,14 +538,11 @@ Future<void> showContactDetails(BuildContext context, {
     context: context,
     isScrollControlled: true,
     backgroundColor: Colors.transparent,
-    builder: (ctx) => FractionallySizedBox(
-      heightFactor: 0.85,
-      child: ContactDetailsSheet(
-        name: name,
-        phone: phone,
-        avatarColor: avatarColor,
-        avatarTextColor: avatarTextColor,
-      ),
+    builder: (ctx) => ContactDetailsSheet(
+      name: name,
+      phone: phone,
+      avatarColor: avatarColor,
+      avatarTextColor: avatarTextColor,
     ),
   );
 }

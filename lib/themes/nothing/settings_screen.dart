@@ -367,6 +367,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ],
               ),
             ),
+            CupertinoActionSheetAction(
+              onPressed: () {
+                _setAppTheme('pixel');
+                Navigator.pop(ctx);
+              },
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text('Pixel UI', style: TextStyle(color: _nLabel, fontFamily: _nFont)),
+                  if (_appTheme == 'pixel') ...[
+                    const SizedBox(width: 8),
+                    const Icon(CupertinoIcons.checkmark_alt, color: _nRed, size: 18),
+                  ],
+                ],
+              ),
+            ),
           ],
           cancelButton: CupertinoActionSheetAction(
             isDefaultAction: true,
@@ -530,7 +546,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   _buildSettingCard([
                     _buildListTile(
                       title: 'APP THEME',
-                      subtitle: _appTheme == 'nothing' ? 'Nothing UI' : 'Onyx (iOS Style)',
+                      subtitle: _appTheme == 'nothing'
+                          ? 'Nothing UI'
+                          : _appTheme == 'pixel'
+                              ? 'Pixel UI'
+                              : 'Onyx (iOS Style)',
                       trailing: const Icon(Icons.arrow_forward_ios_rounded, color: _nSecondary, size: 14),
                       onTap: _showThemeSelectionSheet,
                     ),

@@ -84,7 +84,8 @@ class MainActivity: FlutterActivity() {
                     "number" to num,
                     "name" to resolveContactName(num),
                     "connectTime" to connectTime,
-                    "elapsedSeconds" to elapsedSeconds
+                    "elapsedSeconds" to elapsedSeconds,
+                    "simLabel" to getCallSimLabel(call)
                 )
                 runOnUiThread {
                     eventSink?.success(data)
@@ -148,8 +149,10 @@ class MainActivity: FlutterActivity() {
     }
 
     override fun onDestroy() {
-        super.onDestroy()
+        toneGenerator?.release()
+        toneGenerator = null
         if (instance == this) instance = null
+        super.onDestroy()
     }
 
     override fun onKeyDown(keyCode: Int, event: android.view.KeyEvent?): Boolean {
@@ -200,6 +203,19 @@ class MainActivity: FlutterActivity() {
             e.printStackTrace()
         }
         return null
+    }
+
+    private fun getCallSimLabel(call: Call?): String? {
+        if (call == null) return null
+        return try {
+            val telecomManager = getSystemService(Context.TELECOM_SERVICE) as TelecomManager
+            val handle = call.details?.accountHandle
+            if (handle != null) {
+                telecomManager.getPhoneAccount(handle)?.label?.toString()
+            } else null
+        } catch (e: Exception) {
+            null
+        }
     }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -463,7 +479,8 @@ class MainActivity: FlutterActivity() {
                             "state" to state,
                             "name" to contactName,
                             "connectTime" to connectTime,
-                            "elapsedSeconds" to elapsedSeconds
+                            "elapsedSeconds" to elapsedSeconds,
+                            "simLabel" to getCallSimLabel(call)
                         )
                         result.success(map)
                     } else {
@@ -584,7 +601,8 @@ class MainActivity: FlutterActivity() {
                                 "number" to num,
                                 "name" to resolveContactName(num),
                                 "connectTime" to connectTime,
-                                "elapsedSeconds" to elapsedSeconds
+                                "elapsedSeconds" to elapsedSeconds,
+                                "simLabel" to getCallSimLabel(call)
                             )
                             eventSink?.success(data)
                         }
@@ -600,7 +618,8 @@ class MainActivity: FlutterActivity() {
                             "number" to num,
                             "name" to resolveContactName(num),
                             "connectTime" to connectTime,
-                            "elapsedSeconds" to elapsedSeconds
+                            "elapsedSeconds" to elapsedSeconds,
+                            "simLabel" to getCallSimLabel(it)
                         )
                         eventSink?.success(data)
                     }
@@ -660,12 +679,6 @@ class MainActivity: FlutterActivity() {
         } catch (e: SecurityException) {
             e.printStackTrace()
         }
-    }
-
-    override fun onDestroy() {
-        toneGenerator?.release()
-        toneGenerator = null
-        super.onDestroy()
     }
 
     private fun getUserProfilePhoto(): ByteArray? {

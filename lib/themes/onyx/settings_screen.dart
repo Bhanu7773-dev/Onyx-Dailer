@@ -211,6 +211,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ],
             ),
           ),
+          CupertinoActionSheetAction(
+            onPressed: () {
+              _setAppTheme('pixel');
+              Navigator.pop(context);
+            },
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Text('Pixel UI'),
+                if (_appTheme == 'pixel') const Icon(CupertinoIcons.check_mark, size: 18),
+              ],
+            ),
+          ),
         ],
         cancelButton: CupertinoActionSheetAction(
           isDestructiveAction: true,
@@ -390,7 +403,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ? 'Onyx (Default)'
                   : _appTheme == 'nothing'
                       ? 'Nothing UI'
-                      : _appTheme.toUpperCase(),
+                      : _appTheme == 'pixel'
+                          ? 'Pixel UI'
+                          : _appTheme.toUpperCase(),
               trailing: const Icon(CupertinoIcons.chevron_up_chevron_down, color: _iosSecondary, size: 16),
               onTap: _showThemeSelectionSheet,
             ),
